@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ClipboardList, Plus, Building2, Boxes, Hash, Package, User, CheckCircle, XCircle, Mail, Filter, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { Modal } from '../componentes dashboard/Modal.jsx';
 import { TextArea, Select, Input } from '../Inputs';
-import AlertItem from '../Alerts';
+import { toast } from '../GoeyToaster';
 import ConfirmationModal from '../Confirmacion';
 import { Avatar, AvatarFallback, AvatarImage } from '../Avatar';
 import ModalEstacion from '../ModalEstacion';
@@ -10,10 +10,9 @@ import { div, select } from 'motion/react-client';
 
 
 
-const TablaInventario = ({ data = [], alSeleccionar, loading: apiLoading, currentPage = 1, totalPages = 1, onPageChange, isAdmin, onFilter, gerencias = [], roles = [], filtrosActuales = {}, onCreated, GerenciasPresupuesto = [] }) => {
+const TablaInventario = ({ data = [], alSeleccionar, loading: apiLoading, currentPage = 1, totalPages = 1, totalItems = 0, onPageChange, isAdmin, onFilter, gerencias = [], roles = [], filtrosActuales = {}, onCreated, GerenciasPresupuesto = [], searchQuery = '' }) => {
     const [modalOpen, setModalOpen] = useState(false);
     const [selected, setSelected] = useState(null);
-    const [alerts, setAlerts] = useState([]);
     const [result, setResult] = useState(false)
     const [isProcessingLocal, setIsProcessingLocal] = useState(false);
     const [processSuccessMessage, setProcessSuccessMessage] = useState('');
@@ -33,26 +32,50 @@ const TablaInventario = ({ data = [], alSeleccionar, loading: apiLoading, curren
         if (alSeleccionar) alSeleccionar(tabName);
     };
 
+    // Estados locales para filtros del modal de filtros (productos)
+    const [localSearch,    setLocalSearch]    = useState(searchQuery || '');
+    const [localCategoria, setLocalCategoria] = useState('');
+
+    // Sincroniza localSearch cuando el padre limpia el searchQuery (ej: al cambiar de tab)
+    useEffect(() => { setLocalSearch(searchQuery || ''); }, [searchQuery]);
+
+    // Carga categorías y gerencias al montar / cambiar de tab
     useEffect(() => {
         const fetchContext = async () => {
             try {
-                const [cats, prods, gers] = await Promise.all([
-                    fetch(`http://${window.location.hostname}:5000/categorias`, { credentials: 'include' }).then(res => res.json()),
-                    fetch(`http://${window.location.hostname}:5000/productos`, { credentials: 'include' }).then(res => res.json()),
-                    fetch(`http://${window.location.hostname}:5000/context`, { credentials: 'include' }).then(res => res.json())
+                const [cats, gers] = await Promise.all([
+                    fetch(`http://${window.location.hostname}:5000/categorias`, { credentials: 'include' }).then(r => r.json()),
+                    fetch(`http://${window.location.hostname}:5000/context`,   { credentials: 'include' }).then(r => r.json())
                 ]);
-                setContextData({
-                    categorias: cats.data || [],
-                    productos: prods.data || [],
-                    gerencias: gers.gerencias || []
-                });
-                console.log(contextData)
+                setContextData(prev => ({
+                    ...prev,
+                    categorias: cats.data      || [],
+                    gerencias:  gers.gerencias || []
+                }));
             } catch (err) {
-                console.error("Error al cargar context:", err);
+                console.error('Error al cargar context:', err);
             }
         };
         fetchContext();
-    }, [activeTab]); // Refresh context periodically or depending on tab change
+    }, [activeTab]);
+
+    // Carga la lista completa de productos SOLO cuando se abre el modal de
+    // "Nuevo Movimiento" — es el único selector que necesita todos los productos.
+    // Usa /productos SIN ?page para mantener compatibilidad con el endpoint original.
+    useEffect(() => {
+        if (!createModalOpen || activeTab !== 'movimientos') return;
+        if (contextData.productos.length > 0) return; // ya cargados, no repetir
+        const load = async () => {
+            try {
+                const res  = await fetch(`http://${window.location.hostname}:5000/productos`, { credentials: 'include' });
+                const json = await res.json();
+                setContextData(prev => ({ ...prev, productos: json.data || [] }));
+            } catch (err) {
+                console.error('Error cargando productos para selector:', err);
+            }
+        };
+        load();
+    }, [createModalOpen, activeTab]);
 
     const handleCreateChange = (e) => {
         const { name, value } = e.target;
@@ -71,34 +94,24 @@ const TablaInventario = ({ data = [], alSeleccionar, loading: apiLoading, curren
             });
 
             if (resp.ok) {
-                addAlert('success', 'Operación Finalizada', `Registro creado con éxito en ${activeTab}`);
+                toast.success(`Operación Finalizada — Registro creado con éxito en ${activeTab}`);
                 setCreateModalOpen(false);
                 setCreateData({});
                 if (onCreated) onCreated();
             } else {
                 const err = await resp.json();
-                addAlert('error', 'Operación Fallida', `Error: ${err.error}`);
+                toast.error(`Operación Fallida — Error: ${err.error}`);
             }
         } catch (error) {
             console.error("Error al crear:", error);
-            addAlert('error', 'Error', "Error interno al comunicar con el servidor");
+            toast.error('Error — Error interno al comunicar con el servidor');
         } finally {
             setIsProcessingLocal(false);
         }
     };
 
-    // Estados locales para el modal de filtros
-    const [localBusqueda, setLocalBusqueda] = useState(filtrosActuales.busqueda || '');
-    const [localColumna, setLocalColumna] = useState(filtrosActuales.columna || 'nombres');
-    const [localGerencia, setLocalGerencia] = useState(filtrosActuales.gerencia || '');
-
-    useEffect(() => {
-        if (filterModalOpen) {
-            setLocalBusqueda(filtrosActuales.busqueda || '');
-            setLocalColumna(filtrosActuales.columna || 'nombres');
-            setLocalGerencia(filtrosActuales.gerencia || '');
-        }
-    }, [filterModalOpen, filtrosActuales.busqueda, filtrosActuales.columna, filtrosActuales.gerencia]);
+    // (los estados localBusqueda/localColumna/localGerencia del modal antiguo se reemplazaron
+    //  por localSearch y localCategoria definidos arriba, junto a los filtros server-side)
 
     const [visualLoading, setVisualLoading] = useState(true);
 
@@ -135,25 +148,14 @@ const TablaInventario = ({ data = [], alSeleccionar, loading: apiLoading, curren
     };
 
 
-    const addAlert = useCallback((type, title, message) => {
-        const id = Date.now();
-        setAlerts(prev => [...prev, { id, type, title, message }]);
-    }, []);
-
-    const removeAlert = useCallback((id) => {
-        setAlerts(prev => prev.filter(a => a.id !== id));
-    }, []);
+    // using global `toast`
 
 
 
     return (
         <>
 
-            <div className="fixed top-6 right-6 z-[100] flex flex-col items-end pointer-events-none">
-                {alerts.map(alert => (
-                    <AlertItem key={alert.id} {...alert} onClose={removeAlert} />
-                ))}
-            </div>
+            {/* toasts handled globally by GoeyToaster */}
 
             <div className="g:col-span-7 h-full flex flex-col   bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden w-full animate-in fade-in duration-700">
 
@@ -323,19 +325,27 @@ const TablaInventario = ({ data = [], alSeleccionar, loading: apiLoading, curren
 
                 {/* Footer de Paginación */}
                 <div className="p-4 border-t border-slate-100 bg-slate-50/30 flex items-center justify-between shrink-0">
-                    <p className="text-xs text-slate-500 font-medium">
-                        Página <span className="text-slate-800">{currentPage}</span> de <span className="text-slate-800">{totalPages}</span>
-                    </p>
+                    <div className="flex flex-col">
+                        <p className="text-xs text-slate-500 font-medium">
+                            Página <span className="font-bold text-slate-800">{currentPage}</span> de <span className="font-bold text-slate-800">{totalPages}</span>
+                        </p>
+                        {activeTab === 'productos' && (
+                            <p className="text-[10px] text-slate-400">
+                                {totalItems} producto{totalItems !== 1 ? 's' : ''} en total
+                                {searchQuery && <span className="ml-1 text-blue-500">· filtrado</span>}
+                            </p>
+                        )}
+                    </div>
                     <div className="flex gap-2">
                         <button
-                            onClick={() => onPageChange(currentPage - 1)}
+                            onClick={() => onPageChange && onPageChange(currentPage - 1)}
                             disabled={currentPage === 1 || visualLoading}
                             className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
                         >
                             <ChevronLeft className="w-4 h-4 text-slate-600" />
                         </button>
                         <button
-                            onClick={() => onPageChange(currentPage + 1)}
+                            onClick={() => onPageChange && onPageChange(currentPage + 1)}
                             disabled={currentPage === totalPages || visualLoading}
                             className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition-colors"
                         >
@@ -579,6 +589,60 @@ const TablaInventario = ({ data = [], alSeleccionar, loading: apiLoading, curren
                 />
 
 
+            )}
+
+            {/* ── Modal de Filtros (pestaña Productos) ─────────────────────── */}
+            {filterModalOpen && (
+                <Modal
+                    isOpen={filterModalOpen}
+                    onClose={() => setFilterModalOpen(false)}
+                    title="Filtrar Productos"
+                    contenido={
+                        <div className="flex flex-col gap-4">
+                            <Input
+                                label="Buscar por nombre o código"
+                                value={localSearch}
+                                onChange={e => setLocalSearch(e.target.value)}
+                                placeholder="Ej: Papel, PEN-001..."
+                            />
+                            <Select
+                                label="Categoría"
+                                value={localCategoria}
+                                onChange={e => setLocalCategoria(e.target.value)}
+                            >
+                                <option value="">Todas las categorías</option>
+                                {contextData.categorias.map(c => (
+                                    <option key={c.id_categoria} value={c.id_categoria}>
+                                        {c.nombre_categoria}
+                                    </option>
+                                ))}
+                            </Select>
+
+                            <div className="flex justify-between gap-2 mt-2">
+                                <button
+                                    onClick={() => {
+                                        setLocalSearch('');
+                                        setLocalCategoria('');
+                                        if (onFilter) onFilter({ search: '', categoria: '' });
+                                        setFilterModalOpen(false);
+                                    }}
+                                    className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors text-sm"
+                                >
+                                    Limpiar filtros
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (onFilter) onFilter({ search: localSearch, categoria: localCategoria });
+                                        setFilterModalOpen(false);
+                                    }}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold"
+                                >
+                                    Aplicar
+                                </button>
+                            </div>
+                        </div>
+                    }
+                />
             )}
 
         </>

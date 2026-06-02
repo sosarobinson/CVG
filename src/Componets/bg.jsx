@@ -3,7 +3,7 @@ import React from "react";
 export default function Bg() {
   return (<>
 
-    <div className="relative isolate px-6 pt-0 lg:px-8">
+    {/* <div className="relative isolate px-6 pt-0 lg:px-8">
       <div
         aria-hidden="true"
         className="fixed inset-x-0 top-[1] z-1 transform-gpu  overflow-hidden blur-3xl sm:-top-80"
@@ -31,7 +31,7 @@ export default function Bg() {
           className="relative left-[calc(50%+3rem)] aspect-1155/678 w-144.5 -translate-x-1/2 bg-linear-to-tr from-[#60a5fa93] to-[#6a25eb] opacity-30 sm:left-[calc(50%+36rem)] sm:w-288.75"
         />
       </div>
-    </div>
+    </div> */}
 
   </>
 

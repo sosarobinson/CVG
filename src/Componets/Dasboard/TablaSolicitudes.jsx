@@ -1,21 +1,56 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ClipboardList, ChevronLeft, ChevronRight, Eye, Trash2, CheckCircle, XCircle, AlertTriangle, HelpCircle, Filter, Download } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  Box,
+  ChevronRight,
+  ClipboardList,
+  DollarSign,
+  Download,
+  Eye,
+  FileText,
+  Filter,
+  HelpCircle,
+  MessageSquare,
+  Package,
+  PackageOpen,
+  Printer,
+  Search,
+  CheckCircle,
+  ShoppingCart,
+  Trash2,
+  X,
+  ChevronLeft,
+  XCircle,
+  Edit3
+} from 'lucide-react';
 import { Modal } from '../componentes dashboard/Modal.jsx';
+import ModalEditarSolicitud from './ModalEditarSolicitud';
 import { TextArea, Select, Input } from '../Inputs';
 import { Boton } from "../componentes dashboard/Numsolisitud.jsx";
 import { BotonReporte } from "../CarruselItems/botonreporte.jsx";
-import AlertItem from '../Alerts.jsx';
+import { toast } from '../GoeyToaster';
 import ConfirmationModal from '../Confirmacion.jsx';
+import { Avatar, AvatarFallback, AvatarImage } from "../Avatar.jsx";
 
-const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, totalPages = 1, onPageChange, isAdmin, onRefresh, onFilter, filtrosValue = {}, onMessageSent }) => {
+const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, totalPages = 1, onPageChange, isAdmin, onRefresh, onFilter, filtrosValue = {}, onMessageSent, datauser }) => {
   // --- ESTADOS DE UI ---
-  const [alerts, setAlerts] = useState([]);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [detalles, setDetalles] = useState([]);   // ← productos/servicios de la solicitud
+  const [loadingDetalles, setLoadingDetalles] = useState(false);
   const [visualLoading, setVisualLoading] = useState(true);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [localBusqueda, setLocalBusqueda] = useState(filtrosValue.busqueda || '');
   const [localEstado, setLocalEstado] = useState(filtrosValue.estado || '');
+
+  // Sincronizar valores locales cuando cambian los filtros desde el padre
+  useEffect(() => {
+    setLocalBusqueda(filtrosValue.busqueda || '');
+    setLocalEstado(filtrosValue.estado || '');
+  }, [filtrosValue]);
 
   // --- ESTADOS DE PROCESAMIENTO SUAVE ---
   const [isProcessingLocal, setIsProcessingLocal] = useState(false);
@@ -26,6 +61,7 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
   const [adjustField, setAdjustField] = useState('resumen');
   const [adjustMessage, setAdjustMessage] = useState('');
   const [includeContext, setIncludeContext] = useState(true);
+  const [editModalOpen, setEditModalOpen] = useState(false);
 
   // --- ESTADO DE MODAL DE CONFIRMACIÓN DINÁMICO ---
   const [confModal, setConfModal] = useState({
@@ -36,7 +72,19 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
     onConfirm: () => { }
   });
 
-  const isAdminView = isAdmin === 'SuperAdministrador' || isAdmin === 5 || isAdmin === 1 || isAdmin === 'administrador';
+  // --- DETECCIÓN DE ROLES ---
+  const rolStr = typeof isAdmin === 'string' ? isAdmin.toLowerCase().trim() : '';
+  const rolId = typeof isAdmin === 'number' ? isAdmin : null;
+
+  const isSuperAdmin = rolId === 5 || rolStr === 'superadministrador';
+  const isAdministrador = rolId === 11 || rolStr === 'administrador';
+  const isGerente = rolId === 8 || rolStr.includes('gerente');
+  const isComprador = rolId === 10 || rolStr === 'comprador';
+  const isAlmacenista = rolId === 9 || rolStr === 'almacenista';
+  const isPersonal = rolId === 12 || rolStr === 'personal';
+
+  // isAdminView: cualquier rol con acceso al panel (no Personal)
+  const isAdminView = isSuperAdmin || isAdministrador || isGerente || isComprador || isAlmacenista;
 
   // Manejo de Skeleton
   useEffect(() => {
@@ -48,24 +96,36 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
     }
   }, [apiLoading, currentPage]);
 
-  // --- GESTIÓN DE ALERTAS (TOASTS) ---
-  const addAlert = useCallback((type, title, message) => {
-    const id = Date.now();
-    setAlerts(prev => [...prev, { id, type, title, message }]);
-  }, []);
-
-  const removeAlert = useCallback((id) => {
-    setAlerts(prev => prev.filter(a => a.id !== id));
-  }, []);
+  // using global `toast` from GoeyToaster
 
   // --- FUNCIONES DE ACCIÓN ---
-  const openModal = (row) => {
+  const openModal = async (row) => {
     setSelected(row);
+    setDetalles([]);
     setModalOpen(true);
+    // Carga los detalles desde el servidor
+    try {
+      setLoadingDetalles(true);
+      const resp = await fetch(
+        `http://${window.location.hostname}:5000/solicitudes/${row.id_solicitud}`,
+        { credentials: 'include' }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        console.log('detalles :', data)
+        setSelected(data.solicitud);  // datos completos (incluye requerimientos_texto, pdf, etc.)
+        setDetalles(data.detalles || []);
+      }
+    } catch (e) {
+      console.error('Error cargando detalles:', e);
+    } finally {
+      setLoadingDetalles(false);
+    }
   };
 
   const closeModal = () => {
     setSelected(null);
+    setDetalles([]);
     setModalOpen(false);
   };
 
@@ -104,70 +164,69 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
         body: JSON.stringify({ estado: newStatus })
       });
       if (resp.ok) {
-        setProcessSuccessMessage(newStatus === 'Aprobado' ? '¡Solicitud Aprobada!' : 'Solicitud Rechazada');
+        const isAprobado = String(newStatus).toLowerCase().includes('aprob') || String(newStatus).toLowerCase().includes('aprov');
+        setProcessSuccessMessage(isAprobado ? '¡Solicitud Aprobada!' : 'Solicitud actualizada');
 
         // Retrasamos el cierre brusco para mostrar la animación suave de éxito en el modal
-        // 1. Iniciamos el cierre tras mostrar el mensaje de éxito por 2 segundos
-        setTimeout(() => {
-          // Cerramos el modal de detalles/formulario primero
-          setModalOpen(false);
 
-          // 2. Damos un pequeño margen para que el modal principal empiece a cerrar
-          // y luego quitamos el mensaje de éxito para que el usuario vea la tabla limpia
-          setTimeout(() => {
-            // Ejecutamos el refresh de los datos de la tabla antes de quitar el overlay
-            if (onRefresh) onRefresh();
+        setModalOpen(false);
 
-            // Quitamos el estado de procesamiento (el overlay con blur)
-            setIsProcessingLocal(false);
 
-            // Limpiamos el mensaje para la próxima vez
-            setProcessSuccessMessage('');
+        if (onRefresh) onRefresh();
+        setIsProcessingLocal(false);
+        setProcessSuccessMessage('');
 
-            // Lanzamos la alerta global (Toast)
-            addAlert(
-              'success',
-              'Operación Finalizada',
-              `La solicitud #${id} ha sido ${newStatus.toLowerCase()} correctamente.`
-            );
-          }, 600); // 600ms es el tiempo ideal para que el modal cierre visualmente
+        if (isAprobado) {
+          toast.success(`Operación Finalizada`, {
+            description: `La solicitud #${id} ha sido aprobada correctamente.`,
+          });
+        } else {
+          toast.warning(`Operación Finalizada`, {
+            description: `La solicitud #${id} ha sido rechazada correctamente.`,
+          });
+        }
 
-        }, 2500); // 2.5s es el tiempo que el usuario necesita para leer "Solicitud Aprobada"
+
+
+
+
 
       } else {
         const err = await resp.json();
         setIsProcessingLocal(false);
-        addAlert('error', 'Error', err.message || 'No se pudo actualizar el estado.');
+        toast.error('Error', { description: err.message || 'No se pudo actualizar el estado.' });
       }
     } catch (error) {
       setIsProcessingLocal(false);
-      addAlert('error', 'Error crítico', 'Error de conexión con el servidor.');
+      toast.error('Error', { description: 'Error de conexión con el servidor.' });
     }
   };
 
-  const handleApprove = (id) => {
-    // IMPORTANTE: Asegúrate de que tu ConfirmationModal.jsx tenga el caso 'success'
-    // Si no lo tiene, puedes usar 'question' temporalmente para evitar el error de "theme undefined"
+  const handleApprove = (id, targetStatus = 'Aprobado Gerencia') => {
+    const targetId = id || selected?.id_solicitud || selected?.id || null;
+    if (!targetId) { toast.error('Error', { description: 'ID de solicitud no encontrado' }); return; }
     triggerAction({
       title: "¿Confirmar Aprobación?",
-      message: `Estás por aprobar la solicitud #${id}. Esta acción notificará al usuario y cambiará el estado del expediente.`,
-      type: "question", // Cambiado a 'question' para asegurar compatibilidad con tu componente actual
-      action: () => changeStatus(id, 'Aprobado')
+      message: `Estás por aprobar la solicitud #${targetId}. Esta acción notificará al usuario y cambiará el estado del expediente.`,
+      type: "question",
+      action: () => changeStatus(targetId, targetStatus)
     });
   };
 
   const handleReject = (id) => {
+    const targetId = id || selected?.id_solicitud || selected?.id || null;
+    if (!targetId) { toast.error('Error', { description: 'ID de solicitud no encontrado' }); return; }
     triggerAction({
       title: "¿Rechazar Solicitud?",
-      message: `¿Estás seguro de rechazar la solicitud #${id}? Esta acción es definitiva.`,
+      message: `¿Estás seguro de rechazar la solicitud #${targetId}? Esta acción es definitiva.`,
       type: "danger",
-      action: () => changeStatus(id, 'Rechazado')
+      action: () => changeStatus(targetId, 'Rechazado')
     });
   };
 
   const submitAdjustment = async () => {
     if (!adjustMessage.trim()) {
-      addAlert('error', 'Campo vacío', 'Por favor, ingresa un mensaje de ajuste.');
+      toast.error('Campo vacío', { description: 'Por favor, ingresa un mensaje de ajuste.' });
       return;
     }
 
@@ -175,36 +234,62 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
       let message = includeContext
         ? `Ajuste en "${adjustField}": ${adjustMessage}. Valor actual: ${selected[adjustField]}`
         : adjustMessage;
+      // Si la solicitud existe, enviamos al endpoint específico de la solicitud (chat grupal)
+      if (selected?.id_solicitud) {
+        const resp = await fetch(`http://${window.location.hostname}:5000/solicitudes/${selected.id_solicitud}/mensaje`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mensaje: message })
+        });
 
-      const body = { mensaje: message, toId: selected.id_solicitante, tipo: 'ajuste' };
-      const resp = await fetch(`http://${window.location.hostname}:5000/mensajes`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      if (resp.ok) {
-        setAskAdjustOpen(false);
-        addAlert('success', 'Enviado', 'La solicitud de ajuste fue enviada con éxito.');
-        setAdjustMessage('');
-        if (onMessageSent) onMessageSent(); // Refrescar chats padre
+        if (resp.ok) {
+          setAskAdjustOpen(false);
+          toast.success('Enviado', { description: 'La solicitud de ajuste fue enviada con éxito.' });
+          setAdjustMessage('');
+          if (onMessageSent) onMessageSent();
+        } else {
+          const err = await resp.json().catch(() => ({}));
+          toast.error('Error', { description: err.message || 'No se pudo enviar la solicitud al servidor.' });
+        }
       } else {
-        addAlert('error', 'Error', 'No se pudo enviar la solicitud al servidor.');
+        // Fallback: mensaje privado al endpoint general
+        const body = { mensaje: message, toId: selected?.id_solicitante, tipo: 'ajuste' };
+        const resp = await fetch(`http://${window.location.hostname}:5000/mensajes`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (resp.ok) {
+          setAskAdjustOpen(false);
+          toast.success('Enviado', { description: 'La solicitud de ajuste fue enviada con éxito.' });
+          setAdjustMessage('');
+          if (onMessageSent) onMessageSent();
+        } else {
+          const err = await resp.json().catch(() => ({}));
+          toast.error('Error', { description: err.message || 'No se pudo enviar la solicitud al servidor.' });
+        }
       }
     } catch (error) {
-      addAlert('error', 'Error Crítico', 'Error de conexión con el servidor.');
+      toast.error('Error', { description: 'Error de conexión con el servidor.' });
     }
+  };
+
+  const obtenerIniciales = (nombre) => {
+    if (!nombre) return "";
+    return nombre
+      .split(" ")                   // Divide el nombre por cada espacio
+      .filter(word => word !== "")  // Elimina espacios extra si los hay
+      .map(word => word[0])         // Toma el primer caracter de cada palabra
+      .join("")                     // Une las letras
+      .toUpperCase();               // Lo pone en mayúsculas
   };
 
   return (
     <>
-      {/* CONTENEDOR DE ALERTAS FLOTANTES */}
-      <div className="fixed top-6 right-6 z-[100] flex flex-col items-end pointer-events-none">
-        {alerts.map(alert => (
-          <AlertItem key={alert.id} {...alert} onClose={removeAlert} />
-        ))}
-      </div>
+      {/* toasts handled globally by GoeyToaster */}
 
       {/* MODAL DE CONFIRMACIÓN ÚNICO Y DINÁMICO */}
       <ConfirmationModal
@@ -220,25 +305,29 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
         {/* Cabecera de Tabla */}
         <div className="p-4 border-b border-slate-50 flex items-center gap-3 shrink-0">
           <ClipboardList className="w-5 h-5 text-blue-500" />
-          <h2 className="font-bold text-slate-800">Listado de Solicitudes</h2>
-          {isAdmin && (
+          <h2 className="font-bold text-slate-800">
+            {isPersonal ? 'Mis Solicitudes' : 'Listado de Solicitudes'}
+          </h2>
+          {/* Solo admins/gerentes ven controles de filtro y reporte */}
+          {isAdminView && (
             <>
               <button
                 onClick={() => setFilterModalOpen(true)}
                 className="ml-4 p-2 rounded-2xl bg-white shadow-sm t-slate-600 hover:bg-slate-100 hover:text-blue-600 transition-colors flex items-center gap-2 text-xs font-semibold"
               >
                 <Filter size={16} />
-                <span className="max-lg:hidden">
-                  Filtros
-                </span>
+                <span className="max-lg:hidden">Filtros</span>
               </button>
 
-              <Boton datauser={data} onRefresh={() => setRefreshKey(prev => prev + 1)} ></Boton>
-              {isAdminView && (<>
-                <BotonReporte idSolicitud={1} />
-              </>)}
+              <Boton onRefresh={onRefresh} />
+              {/* {(isSuperAdmin || isAdministrador) && (
+                // <BotonReporte idSolicitud={1} />
+              )} */}
             </>
-
+          )}
+          {/* Personal solo ve botón de actualizar */}
+          {isPersonal && (
+            <Boton onRefresh={onRefresh} />
           )}
           <div className='flex justify-center items-center ml-auto gap-2'>
             {[...Array(Math.min(totalPages, 5))].map((_, i) => (
@@ -254,8 +343,10 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
               <tr className="border-b border-slate-100">
                 <th className="px-6 py-4 backdrop-blur-sm bg-slate-50/80">ID</th>
                 <th className="w-[200px] px-6 py-4 backdrop-blur-sm bg-slate-50/80">Resumen</th>
+
+                <th className="px-6 py-4 backdrop-blur-sm w-[230px]  bg-slate-50/80">Gerencia</th>
                 <th className="px-6 py-4 backdrop-blur-sm bg-slate-50/80">Estado</th>
-                <th className="px-6 py-4 text-right backdrop-blur-sm bg-slate-50/80">Monto</th>
+                <th className="px-6 py-4 text-right backdrop-blur-sm bg-slate-50/80">Tipo</th>
                 <th className="px-6 py-4 text-right backdrop-blur-sm bg-slate-50/80">Acciones</th>
               </tr>
             </thead>
@@ -277,16 +368,18 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
                   <tr key={row.id_solicitud} className="hover:bg-slate-50/50 transition-colors animate-in fade-in duration-300">
                     <td className="px-6 py-3.5 font-bold text-slate-400">#{row.id_solicitud}</td>
                     <td className="px-6 py-3.5 font-semibold text-slate-700 truncate">{row.resumen}</td>
-                    <td className="px-6 py-3.5">
-                      <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase border ${row.estado === 'Aprobado' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                        row.estado === 'Rechazado' ? 'bg-rose-50 text-rose-600 border-rose-100' :
-                          'bg-amber-50 text-amber-600 border-amber-100'
-                        }`}>
-                        {row.estado}
+
+                    <td className="px-6 py-3.5 text-left text-nowrap w-max font-mono font-bold text-slate-800">
+                      {row.nombre_gerencia}
+                    </td>
+                    <td className="px-6 py-3.5 text-nowrap w-max ">
+                      <span style={{ backgroundColor: "", color: row.estado_color, borderColor: row.estado_color }} className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase border `}>
+
+                        {row.estado_nombre}
                       </span>
                     </td>
                     <td className="px-6 py-3.5 text-right font-mono font-bold text-slate-800">
-                      ${Number(row.monto_estimado || 0).toLocaleString()}
+                      {row.tipo_solicitud}
                     </td>
                     <td className="px-6 py-3.5 text-right">
                       <button onClick={() => openModal(row)} className="text-blue-600 hover:scale-110 transition-transform">
@@ -314,217 +407,296 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
         </div>
       </div>
 
-      {/* MODAL DETALLE SOLICITUD */}
+      {/* MODAL DETALLE SOLICITUD - VISTA EXPANDIDA */}
       {modalOpen && selected && (
         <Modal
           onClose={closeModal}
+          padding={false}
           contenido={
-            <div className="flex flex-col h-full bg-white w-[600px] max-sm:w-[90dvw] max-sm:h-[90dvh] overflow-y-auto px-4 py-6 custom-scrollbar relative">
+            <div className="flex flex-col h-[90vh] bg-slate-50 w-[1100px] max-lg:w-[95vw] max-sm:w-full max-sm:h-full overflow-hidden relative shadow-2xl rounded-[2rem] border border-white">
 
-              {/* CORTINA PANTALLA CARGA/ÉXITO SUAVE */}
-              {isProcessingLocal && (
-                <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 rounded-[32px] overflow-hidden group">
-                  {/* Fondo con desenfoque profundo y capa de color sutil */}
-                  <div className="absolute inset-0 bg-white/60 backdrop-blur-md animate-in fade-in duration-500" />
+              {/* HEADER SUPERIOR */}
+              <div className="bg-white px-10 py-7 border-b border-slate-100 flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-5">
+                  <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-3.5 rounded-2xl shadow-xl shadow-blue-200/50">
+                    <FileText className="text-white w-7 h-7" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-3 mb-1">
+                      <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.25em]">Sistema ERP</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-200"></span>
+                      <span className="text-[10px] max-sm:opacity-0 font-bold text-slate-400 uppercase">Expediente Digital</span>
+                    </div>
+                    <h3 className="text-3xl max-sm:text-xl font-black text-slate-900 leading-none">
+                      Solicitud <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">#{selected.id_solicitud}</span>
+                    </h3>
+                  </div>
+                </div>
 
-                  {/* Contenedor de contenido con elevación */}
-                  <div className="relative z-10 flex flex-col items-center text-center">
-                    {processSuccessMessage ? (
-                      <div className="flex flex-col items-center gap-6 animate-in zoom-in-90 slide-in-from-bottom-4 duration-500 ease-out">
-                        {processSuccessMessage === 'Solicitud Rechazada' ? (
-                          <div className="relative">
-                            {/* Brillo de fondo para error */}
-                            <div className="absolute inset-0 bg-rose-500/20 blur-3xl rounded-full animate-pulse" />
-                            <div className="relative bg-rose-50 p-5 rounded-[24px] border border-rose-100 shadow-xl shadow-rose-500/10">
-                              <XCircle className="w-14 h-14 text-rose-500 animate-in spin-in-90 duration-700" />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="relative">
-                            {/* Brillo de fondo para éxito */}
-                            <div className="absolute inset-0 bg-emerald-500/20 blur-3xl rounded-full animate-pulse" />
-                            <div className="relative bg-emerald-50 p-5 rounded-[24px] border border-emerald-100 shadow-xl shadow-emerald-500/10">
-                              <CheckCircle className="w-14 h-14 text-emerald-500 animate-in zoom-in duration-500 ease-out" />
-                            </div>
-                          </div>
-                        )}
+                <div className="flex items-center gap-6 mr-4">
+                  <div className="text-right hidden md:block">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Tipo de Gestión</p>
+                    <p className="text-sm font-black text-blue-800">{selected.tipo_solicitud}</p>
+                  </div>
+                  <div className={`px-5 py-2.5 rounded-2xl text-[11px] font-black uppercase tracking-wider border shadow-sm transition-all
+              ${selected.estado_nombre === 'Aprobado' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                      selected.estado_nombre === 'Rechazado' ? 'bg-rose-50 text-rose-700 border-rose-100' :
+                        'bg-amber-50 max-sm:text-[8px] text-amber-700 border-amber-100 animate-pulse-subtle'}
+            `}>
+                    {selected.estado_nombre}
+                  </div>
+                </div>
+              </div>
 
-                        <div className="space-y-1">
-                          <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
-                            {processSuccessMessage}
-                          </h3>
-                          <p className="text-slate-500 text-sm font-medium">
-                            {processSuccessMessage === 'Solicitud Rechazada'
-                              ? 'La acción ha sido cancelada'
-                              : 'Operación completada con éxito'}
-                          </p>
-                        </div>
+              {/* CONTENIDO PRINCIPAL */}
+
+              <div className="flex flex-1 max-sm:h-fit overflow-hidden max-sm:overflow-auto max-sm:flex-col">
+
+                {/* COLUMNA IZQUIERDA: RESUMEN (60%) */}
+                <div className="w-[62%] max-sm:w-full max-sm:overflow-visible overflow-y-auto p-10 space-y-10 bg-white custom-scrollbar">
+                  <div className="hidden max-sm:block">                 <p className="text-xl font-bold text-slate-400 uppercase tracking-tighter">Tipo de Gestión</p>
+                    <p className="text-sm font-black text-blue-800">{selected.tipo_solicitud}</p></div>
+                  {/* Título y Gerencia */}
+                  <section className="space-y-4">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Gerencia: {selected.nombre_gerencia}</span>
+                    </div>
+                    <h4 className="text-2xl font-black text-slate-800 leading-tight tracking-tight">
+                      {selected.resumen}
+                    </h4>
+                  </section>
+
+                  {/* Justificación */}
+                  <section>
+                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-3">
+                      Justificación del Pedido <div className="h-px flex-1 bg-slate-100"></div>
+                    </h4>
+                    <div className="relative group">
+                      <div className="absolute -inset-1 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-[2rem] blur opacity-25"></div>
+                      <div className="relative bg-white p-8 rounded-[1.5rem] border border-slate-200 shadow-sm leading-relaxed text-slate-600 text-base whitespace-pre-wrap">
+                        {selected.justificacion || "Sin justificación técnica detallada."}
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Métricas Inferiores */}
+                  <div className="grid grid-cols-1 gap-8 pt-4">
+                    <div className="bg-slate-50 p-6 rounded-[1.5rem] border border-slate-200 flex flex-col justify-center">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-[0.1em]">Fecha de Emisión</p>
+                      <p className="text-sm font-black text-slate-700 uppercase">
+                        {selected.fecha_creacion
+                          ? new Date(selected.fecha_creacion).toLocaleDateString('es-ES', {
+                            day: '2-digit',
+                            month: 'long',
+                            year: 'numeric'
+                          })
+                          : "Fecha no registrada"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* COLUMNA DERECHA: ESPECIFICACIONES (38%) */}
+                <div className="flex-1 max-sm:h-fit max-sm:overflow-visible overflow-y-auto p-10 space-y-6 bg-slate-50/80 custom-scrollbar border-l border-slate-100">
+                  <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-6">
+                    <ClipboardList size={18} className="text-blue-600" /> Especificaciones Técnicas
+                  </h4>
+
+                  {/* Listado de items reales de la solicitud */}
+                  <div className="space-y-4">
+                    {loadingDetalles ? (
+                      <div className="flex items-center gap-3 p-4 text-slate-400 text-sm">
+                        <span className="animate-spin">⏳</span> Cargando ítems...
+                      </div>
+                    ) : detalles.length === 0 ? (
+                      <div className="bg-slate-100 p-5 rounded-2xl text-slate-400 text-xs text-center">
+                        Sin productos o servicios registrados en esta solicitud.
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-300">
-                        <div className="relative w-20 h-20 flex items-center justify-center">
-                          {/* Spinner Moderno: Doble anillo */}
-                          <div className="absolute inset-0 border-4 border-slate-100 rounded-full" />
-                          <div className="absolute inset-0 border-4 border-blue-600 border-t-transparent rounded-full animate-spin shadow-sm" />
-                          <div className="w-8 h-8 bg-blue-50 rounded-full flex items-center justify-center">
-                            <div className="w-2 h-2 bg-blue-600 rounded-full animate-ping" />
+                      detalles.map((item, i) => (
+                        <div key={item.id_detalle} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-300 transition-all">
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="text-[10px] font-black px-2 py-1 bg-slate-100 rounded text-slate-500 uppercase">Ítem #{i + 1}</span>
+                            <Package size={16} className="text-slate-300" />
                           </div>
-                        </div>
 
-                        <div className="flex flex-col items-center">
-                          <span className="text-lg font-extrabold text-slate-800 tracking-tight uppercase text-[11px] bg-slate-100 px-3 py-1 rounded-full mb-2">
-                            Sistema de Control
-                          </span>
-                          <span className="text-blue-600 font-bold animate-pulse text-lg">
-                            Procesando acción...
-                          </span>
+                          {item.id_producto ? (
+                            <>
+                              <p className="text-sm font-bold text-slate-800 mb-1 leading-snug">{item.nombre_item}</p>
+                              <p className="text-xs text-slate-500 mb-3 line-clamp-2">{item.descripcion_detalle || ''}</p>
+                              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                                <div className="text-center">
+                                  <p className="text-[9px] font-bold text-slate-400 uppercase">Código</p>
+                                  <p className="text-xs font-black text-blue-700 font-mono">{item.codigo_item || '—'}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] font-bold text-slate-400 uppercase">Cantidad</p>
+                                  <p className="text-xs font-black text-slate-700">{item.cantidad}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-[9px] font-bold text-slate-400 uppercase">Unidad</p>
+                                  <p className="text-xs font-black text-slate-700">{item.unidad_abreviatura || item.nombre_unidad || '—'}</p>
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm font-bold text-slate-800 mb-1">Servicio #{item.id_servicio}</p>
+                              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                                <div className="text-center">
+                                  <p className="text-[9px] font-bold text-slate-400 uppercase">Cantidad</p>
+                                  <p className="text-xs font-black text-slate-700">{item.cantidad}</p>
+                                </div>
+                              </div>
+                            </>
+                          )}
                         </div>
+                      ))
+                    )}
+
+                    {/* Requerimientos adicionales */}
+                    {selected?.requerimientos_texto && (
+                      <div className="bg-blue-50/60 p-5 rounded-2xl border border-blue-100">
+                        <p className="text-[10px] font-black text-blue-700 uppercase mb-2">Requerimientos Adicionales</p>
+                        <p className="text-[11px] text-blue-900 leading-relaxed">{selected.requerimientos_texto}</p>
+                      </div>
+                    )}
+
+                    {/* PDF adjunto */}
+                    {selected?.requerimientos_pdf_url && (
+                      <div className="bg-amber-50/60 p-4 rounded-2xl border border-amber-200 flex items-center gap-3">
+                        <FileText size={16} className="text-amber-600 shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-[10px] font-black text-amber-700 uppercase">Documento Adjunto</p>
+                          <p className="text-xs text-amber-800 font-medium truncate">{selected.requerimientos_pdf_url}</p>
+                        </div>
+                        <a
+                          href={`http://${window.location.hostname}:5000/uploads/solicitudes/${selected.requerimientos_pdf_url}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="text-[10px] font-bold text-amber-700 underline"
+                        >Ver PDF</a>
                       </div>
                     )}
                   </div>
                 </div>
-              )}
-
-              <div className="border-l-4 border-blue-500 pl-4 mb-6">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Expediente de Gestión</span>
-                    <h3 className="text-2xl font-bold text-slate-800">Solicitud #{selected.id_solicitud}</h3>
-                  </div>
-                  <span className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase border ${selected.estado === 'Aprobado' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                    selected.estado === 'Rechazado' ? 'bg-rose-50 text-rose-600 border-rose-100' :
-                      'bg-amber-50 text-amber-600 border-amber-100'
-                    }`}>
-                    {selected.estado}
-                  </span>
-                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="md:col-span-2 space-y-6">
-                  <section>
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase mb-2 flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span> Resumen del Proyecto
-                    </h4>
-                    <p className="text-slate-700 text-lg leading-relaxed font-medium">
-                      {selected.resumen}
-                    </p>
-                  </section>
+              {/* FOOTER - ACCIONES: Lógica de estados */}
+              {(() => {
+                const estadoActual = String(selected.estado_nombre || selected.estado || '').toLowerCase().trim();
+                const esPendiente = estadoActual === 'pendiente';
+                const esAprobadoGerencia = estadoActual.includes('aprobado gerencia');
+                const esEnCompras = estadoActual.includes('en compras');
+                const esRechazado = estadoActual.includes('rechazado');
+                const esEstadoAvanzado = estadoActual.includes('verificado') || esEnCompras || estadoActual.includes('aprovadas');
+                // Estado que ya no requiere acción de Gerente (pero sí puede requerir acción de Comprador)
+                const esFinalOAprobado = esAprobadoGerencia || esRechazado || esEstadoAvanzado;
 
-                  <section>
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase mb-2 flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span> Justificación Detallada
-                    </h4>
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                      <p className="text-slate-600 text-sm italic leading-relaxed">
-                        "{selected.justificacion || 'No se proporcionó una justificación detallada para esta solicitud.'}"
-                      </p>
-                    </div>
-                  </section>
-                </div>
+                // ¿Puede actuar el Comprador en este estado?
+                const compradorPuedeActuar = esEnCompras && (isComprador || isSuperAdmin || isAdministrador);
+                // ¿Puede actuar el Gerente/Admin en este estado?
+                const gerentePuedeActuar = esPendiente && (isGerente || isSuperAdmin || isAdministrador);
 
-                <div className="space-y-4">
-                  <div className="bg-slate-900 rounded-2xl p-5 shadow-lg shadow-blue-100">
-                    <p className="text-[10px] font-bold text-blue-300 uppercase mb-1">Presupuesto Estimado</p>
-                    <p className="text-3xl font-mono font-bold text-white">
-                      ${Number(selected.monto_estimado).toLocaleString()}
-                    </p>
-                  </div>
-
-                  <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-3">Información Adicional</p>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-slate-500">Fecha:</span>
-                        <span className="font-semibold text-slate-700">24/02/2026</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-slate-500">Prioridad:</span>
-                        <span className="font-semibold text-amber-600">Alta</span>
+                return (
+                  <div className="bg-white px-10 py-7 border-t border-slate-100 flex justify-between items-center shrink-0 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)]">
+                    <div className="flex items-center gap-4">
+                      <Avatar className="h-12 w-12 border-2 border-white shadow-md">
+                        <AvatarImage src={selected.avatar} className="object-cover" />
+                        <AvatarFallback className="bg-gradient-to-tr from-blue-600 to-indigo-700 text-white text-sm font-black uppercase">
+                          {obtenerIniciales(selected.nombre_completo)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Responsable</p>
+                        <p className="text-sm font-black text-slate-900">{selected.nombre_completo}</p>
                       </div>
                     </div>
-                  </div>
-                </div>
-              </div>
 
-              {/* Footer: Acciones con Lógica de Estado y Rol */}
-              <div className="mt-auto pt-6 border-t border-slate-100">
-                {selected.estado === 'Aprobado' ? (
-                  <div className="space-y-4">
-                    <div className="bg-emerald-50 border border-emerald-100 p-3 rounded-lg flex items-center gap-3">
-                      <div className="size-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                      <p className="text-emerald-700 text-xs font-medium">
-                        Esta solicitud ya ha sido aprobada y no requiere más acciones de estado.
-                      </p>
+                    <div className="flex gap-3">
+                      {(() => {
+                        const isOwner = selected && Number(selected.id_solicitante) === Number(datauser?.userId);
+                        const isEditableState = selected && (selected.estado_nombre === 'Pendiente' || selected.estado_nombre === 'Borrador');
+                        const canEdit = selected && (isSuperAdmin || isAdministrador || (isOwner && isEditableState));
+
+                        return canEdit && (
+                          <button
+                            onClick={() => setEditModalOpen(true)}
+                            className="px-6 py-3 rounded-xl border border-blue-200 text-blue-600 font-bold text-[11px] uppercase hover:bg-blue-50 transition-all flex items-center gap-2"
+                          >
+                            <Edit3 size={16} /> <span className='max-sm:hidden'>Editar</span>
+                          </button>
+                        );
+                      })()}
+
+                      {isPersonal ? (
+                        /* ── VISTA PERSONAL: solo puede imprimir ── */
+                        <button
+                          onClick={() => window.open(`http://${window.location.hostname}:5000/reporte/${selected.id_solicitud}`, '_blank')}
+                          className="px-8 py-3 rounded-xl bg-slate-900 text-white font-black text-[11px] uppercase flex items-center gap-2 hover:bg-black transition-all"
+                        >
+                          <Printer size={16} /><span className='max-sm:hidden'>Imprimir Copia</span>
+                        </button>
+
+                      ) : isAdminView ? (
+                        /* ── VISTA ADMIN/GERENTE/COMPRADOR ── */
+                        compradorPuedeActuar ? (
+                          /* Comprador: estado 'En Compras' → puede marcar como Aprovadas */
+                          <>
+                            <button onClick={() => handleReject()} className="px-6 py-3 rounded-xl border border-rose-100 text-rose-600 font-bold text-[11px] uppercase hover:bg-rose-50 transition-all flex items-center gap-2">
+                              <XCircle size={16} /> <span className='max-sm:hidden'>Rechazar</span>
+                            </button>
+                            <button onClick={openAdjustModal} className="px-6 py-3 rounded-xl border border-blue-200 text-blue-600 font-bold text-[11px] uppercase hover:bg-blue-50 transition-all flex items-center gap-2">
+                              <MessageSquare size={16} /><span className='max-sm:hidden'>Seguimiento</span>
+                            </button>
+                            <button onClick={() => handleApprove(null, 'Aprovadas')} className="px-8 py-3 rounded-xl bg-emerald-600 text-white font-black text-[11px] uppercase shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all transform active:scale-95 flex items-center gap-2">
+                              <CheckCircle size={16} /><span className='max-sm:hidden'>Aprobar Compra</span>
+                            </button>
+                          </>
+                        ) : esFinalOAprobado ? (
+                          /* Estado ya aprobado o avanzado (sin acción de comprador): solo seguimiento y PDF */
+                          <>
+                            <button onClick={openAdjustModal} className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-[11px] uppercase hover:bg-slate-50 transition-all flex items-center gap-2">
+                              <MessageSquare size={16} /> Seguimiento
+                            </button>
+                            <button
+                              onClick={() => window.open(`http://${window.location.hostname}:5000/reporte/${selected.id_solicitud}`, '_blank')}
+                              className="px-8 py-3 rounded-xl bg-slate-900 text-white font-black text-[11px] uppercase shadow-xl shadow-slate-200 hover:bg-black transition-all flex items-center gap-2"
+                            >
+                              <Download size={16} /> <span className='max-sm:hidden'>Generar PDF</span>
+                            </button>
+                          </>
+                        ) : gerentePuedeActuar ? (
+                          /* Estado Pendiente: Gerente/Admin puede Aprobar o Rechazar */
+                          <>
+                            <button onClick={() => handleReject()} className="px-6 py-3 rounded-xl border border-rose-100 text-rose-600 font-bold text-[11px] uppercase hover:bg-rose-50 transition-all flex items-center gap-2">
+                              <XCircle size={16} /> <span className='max-sm:hidden'>Rechazar</span>
+                            </button>
+                            <button onClick={openAdjustModal} className="px-6 py-3 rounded-xl border border-blue-200 text-blue-600 font-bold text-[11px] uppercase hover:bg-blue-50 transition-all flex items-center gap-2">
+                              <MessageSquare size={16} /><span className='max-sm:hidden'>Ajustes</span>
+                            </button>
+                            <button onClick={() => handleApprove(null, 'Aprobado Gerencia')} className="px-8 py-3 rounded-xl bg-emerald-600 text-white font-black text-[11px] uppercase shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all transform active:scale-95 flex items-center gap-2">
+                              <CheckCircle size={16} /><span className='max-sm:hidden'>Aprobar</span>
+                            </button>
+                          </>
+                        ) : (
+                          /* Borrador u otro estado sin acción disponible: solo seguimiento */
+                          <button onClick={openAdjustModal} className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-[11px] uppercase hover:bg-slate-50 transition-all flex items-center gap-2">
+                            <MessageSquare size={16} /> Seguimiento
+                          </button>
+                        )
+                      ) : (
+                        /* ── OTROS USUARIOS: solo imprimir ── */
+                        <button
+                          onClick={() => window.open(`http://${window.location.hostname}:5000/reporte/${selected.id_solicitud}`, '_blank')}
+                          className="px-8 py-3 rounded-xl bg-slate-900 text-white font-black text-[11px] uppercase flex items-center gap-2 hover:bg-black transition-all"
+                        >
+                          <Printer size={16} /><span className='max-sm:hidden'>Imprimir Copia</span>
+                        </button>
+                      )}
                     </div>
-                    <button
-                      onClick={() => addAlert('info', 'Seguimiento', 'Funcionalidad de mensajes en desarrollo.')}
-                      className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl transition-all"
-                    >
-                      Enviar Mensaje de Seguimiento
-                    </button>
-                    {/* Botón de Descargar Planilla */}
-                    <button
-                      onClick={async () => {
-                        addAlert('info', 'Descargando...', 'Preparando PDF para descarga');
-                        try {
-                          // Se asume el endpoint /reporte/id (ajustalo si en tu backend la ruta cambia)
-                          const res = await fetch(`http://${window.location.hostname}:5000/reporte/${selected.id_solicitud}`);
-                          if (!res.ok) throw new Error("No se pudo generar el reporte");
-                          const blob = await res.blob();
-                          const url = window.URL.createObjectURL(blob);
-                          const link = document.createElement('a');
-                          link.href = url;
-                          link.setAttribute('download', `Solicitud_Aprobada_${selected.id_solicitud}.pdf`);
-                          document.body.appendChild(link);
-                          link.click();
-                          link.remove();
-                          window.URL.revokeObjectURL(url);
-                        } catch (err) {
-                          addAlert('error', 'Error', 'Ocurrió un problema al descargar el archivo.');
-                        }
-                      }}
-                      className="w-full bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200 text-white flex justify-center items-center gap-2 font-bold py-3 rounded-xl transition-all"
-                    >
-                      <Download size={18} /> Descargar Planilla (PDF)
-                    </button>
                   </div>
-                ) : isAdminView ? (
-                  <>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-4 text-center tracking-widest">
-                      Acciones de Administrador
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <button
-                        onClick={() => handleApprove(selected.id_solicitud)}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-sm"
-                      >
-                        Aprobar
-                      </button>
-
-                      <button
-                        onClick={() => handleReject(selected.id_solicitud)}
-                        className="bg-white border-2 border-rose-100 text-rose-600 hover:bg-rose-50 font-bold py-3 px-4 rounded-xl transition-all"
-                      >
-                        Rechazar
-                      </button>
-
-                      <button
-                        onClick={openAdjustModal}
-                        className="bg-white border-2 border-blue-100 text-blue-600 hover:bg-blue-50 font-bold py-3 px-4 rounded-xl transition-all"
-                      >
-                        Pedir Ajustes
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl flex flex-col items-center text-center gap-2">
-                    <p className="text-slate-500 text-xs font-medium italic">
-                      Tu solicitud está en revisión. Se te notificará cuando un administrador realice un cambio de estado.
-                    </p>
-                  </div>
-                )}
-              </div>
+                );
+              })()}
             </div>
           }
         />
@@ -545,23 +717,14 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
                 </p>
               </div>
 
-              <div className="flex items-center mb-6">
-                <label className="relative flex items-center cursor-pointer group">
-                  <input
-                    type="checkbox"
-                    checked={includeContext}
-                    onChange={e => setIncludeContext(e.target.checked)}
-                    className="peer sr-only"
-                    id="ctx-toggle"
-                  />
-                  <div className="w-5 h-5 rounded-lg border-2 border-blue-500 transition-all duration-300 peer-checked:bg-blue-500 peer-checked:border-0 relative">
-                    {includeContext && <CheckCircle size={14} className="text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />}
-                  </div>
-                  <span className="ml-3 text-sm font-medium text-slate-700">
-                    Adjuntar contexto de campo
-                  </span>
-                </label>
+
+              <div className="w-5 h-5 rounded-lg border-2 border-blue-500 transition-all duration-300 peer-checked:bg-blue-500 peer-checked:border-0 relative">
+                {includeContext && <CheckCircle size={14} className="text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />}
               </div>
+              <span className="ml-3 text-sm font-medium text-slate-700">
+                Adjuntar contexto de campo
+              </span>
+
 
               <div className="space-y-4">
                 {includeContext && (
@@ -572,13 +735,12 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
                       options={[
                         { value: 'resumen', label: 'Resumen' },
                         { value: 'justificacion', label: 'Justificación' },
-                        { value: 'monto_estimado', label: 'Monto estimado' },
                       ]}
                       defaultValue={adjustField}
                       onChange={e => setAdjustField(e.target.value)}
                     />
                     <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Valor actual</span>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1"> Valor actual</span>
                       <p className="text-sm text-slate-600 italic truncate">
                         "{selected[adjustField] || 'Sin contenido previo'}"
                       </p>
@@ -610,76 +772,108 @@ const TablaSolicitudes = ({ data = [], loading: apiLoading, currentPage = 1, tot
                   Enviar Solicitud
                 </button>
               </div>
-            </div>
+            </div >
           }
         />
       )}
 
       {/* MODAL DE FILTROS */}
-      {filterModalOpen && (
-        <Modal
-          onClose={() => setFilterModalOpen(false)}
-          contenido={
-            <div className=" w-full h-full flex flex-col  jus  gap-4">
-              <div className=" bg-gradient-to-b from-slate-50/50 to-white">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-100">
-                    <Filter size={22} strokeWidth={2.5} />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-extrabold tracking-tight text-slate-900">Filtros de Búsqueda</h3>
-                    <p className="text-sm text-slate-500 font-medium">Personaliza los resultados de tu tabla</p>
+      {
+        filterModalOpen && (
+          <Modal
+            onClose={() => setFilterModalOpen(false)}
+
+            contenido={
+              <div className=" w-full h-full flex flex-col  jus  gap-4">
+                <div className=" bg-gradient-to-b from-slate-50/50 to-white">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-100">
+                      <Filter size={22} strokeWidth={2.5} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-extrabold tracking-tight text-slate-900">Filtros de Búsqueda</h3>
+                      <p className="text-sm text-slate-500 font-medium">Personaliza los resultados de tu tabla</p>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-[13px] font-bold text-slate-700 ml-1 tracking-wide uppercase">
-                  Estado de la solicitud
-                </label>
-                <Input
-                  label="Buscar por ID o Resumen"
-                  name="busqueda"
+                <div className="flex flex-col gap-2">
+                  <label className="text-[13px] font-bold text-slate-700 ml-1 tracking-wide uppercase">
+                    Estado de la solicitud
+                  </label>
+                  <Input
+                    label="Buscar por ID o Resumen"
+                    name="busqueda"
 
-                  value={localBusqueda}
-                  onChange={(e) => setLocalBusqueda(e.target.value)}
-                />
+                    value={localBusqueda}
+                    onChange={(e) => setLocalBusqueda(e.target.value)}
+                  />
 
-                <Select
-                  label="Filtrar por Estado"
-                  name="estado"
-                  value={localEstado}
-                  onChange={(e) => setLocalEstado(e.target.value)}
-                  options={[
-                    { value: '', label: 'Todos los estados' },
-                    { value: 'Pendiente', label: 'Pendiente' },
-                    { value: 'Aprobado', label: 'Aprobado' },
-                    { value: 'Rechazado', label: 'Rechazado' },
-                  ]}
-                />
-              </div>
+                  <Select
+                    label="Filtrar por Estado"
+                    name="estado"
+                    value={localEstado}
+                    onChange={(e) => setLocalEstado(e.target.value)}
+                    options={[
+                      { value: '', label: 'Todos los estados' },
+                      { value: 'Pendiente', label: 'Pendiente' },
+                      { value: 'Aprobado Gerencia', label: 'Aprobado Gerencia' },
+                      { value: 'Aprovadas', label: 'Aprovadas' },
+                      { value: 'En Compras', label: 'En Compras' },
+                      { value: 'Finalizado', label: 'Finalizado' },
+                      { value: 'Rechazado', label: 'Rechazado' },
+                    ]}
+                  />
+                </div>
 
-              <div className="mt-2 flex w-full px-4 justify-between gap-3">
+                <div className="mt-2 flex w-full px-4 justify-between gap-3">
 
+                  <button
+                    onClick={() => {
+                      // Limpiar filtros localmente y en el padre
+                      setLocalBusqueda('');
+                      setLocalEstado('');
+                      if (onFilter) onFilter({ busqueda: '', estado: '' });
+                      setFilterModalOpen(false);
+                    }}
+                    className="px-4 w-1/2 py-2.5 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all"
+                  >
+                    Limpiar
+                  </button>
 
-                <button
-                  onClick={() => {
-                    if (onFilter) {
-                      onFilter({ busqueda: localBusqueda, estado: localEstado });
-                    }
-                    setFilterModalOpen(false);
-                  }}
-                  className="px-6 w-full flex-1 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95"
-                >
-                  Filtrar
-                </button>
+                  <button
+                    onClick={() => {
+                      if (onFilter) {
+                        onFilter({ busqueda: localBusqueda, estado: localEstado });
+                      }
+                      setFilterModalOpen(false);
+                    }}
+                    className="px-6 w-1/2 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95"
+                  >
+                    Filtrar
+                  </button>
 
+                </div>
+              </div >
+            }
+          />
+        )
+      }
 
-              </div>
-            </div >
-          }
-        />
-      )}
+      {/* MODAL DE EDICIÓN */}
+      {
+        editModalOpen && selected && (
+          <ModalEditarSolicitud
+            solicitud={selected}
+            detallesIniciales={detalles}
+            onClose={() => setEditModalOpen(false)}
+            onRefresh={() => {
+              if (onRefresh) onRefresh();
+              closeModal();
+            }}
+          />
+        )
+      }
     </>
   );
 };

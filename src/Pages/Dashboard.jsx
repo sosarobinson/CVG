@@ -1,25 +1,16 @@
-import Bg from "../Componets/bg";
-import WeeklyEvolution from "../Componets/Dasboard/WeeklyEvolution";
-import { Boton } from "../Componets/componentes dashboard/Numsolisitud";
-import Nav from "../Componets/Nav";
+
 import CarInfo from "../Componets/Dasboard/CarInfo";
-import { BotonReporte } from "../Componets/CarruselItems/botonreporte";
-import { Avatar, AvatarBadge, AvatarImage, AvatarGroup, AvatarFallback } from "../Componets/Avatar";
-import { Mensageria } from "../Componets/Mensajeria/Mensageria";
-import Sidebar from "../Componets/Componentes Grandes/Siderbar";
+
 import TablaSolicitudes from "../Componets/Dasboard/TablaSolicitudes";
-import { HacerSolisitud } from "../Componets/componentes dashboard/Numsolisitud";
 import { useAuth } from "../Constext/AuthToken";
 import { useSocket } from "../Constext/SocketContext";
 import UserCarrucel from "../Componets/componentes dashboard/UserCarrucel";
 import { CarMESAJES } from "../Componets/Mensajeria/Mensageria";
-import { LayoutDashboard, ChartBar, DollarSign, ClipboardList } from 'lucide-react';
-import StatusDashboard from "../Componets/componentes dashboard/Graficas";
-import AlertItem from "../Componets/Alerts";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
-  PieChart, Pie, Legend
-} from 'recharts';
+import { LayoutDashboard, ChartBar, ClipboardList } from 'lucide-react';
+
+import { Select } from "../Componets/Inputs"
+
+
 import {
   Plus,
   Search,
@@ -61,8 +52,46 @@ const Dashboard = () => {
   const [dataGerencias, setDataGerencias] = useState([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [filtros, setFiltros] = useState({ busqueda: '', estado: '' });
-  const limit = 10; // Cantidad de filas por página
+  const limit = 10;
   const [presupuesto, setPresupuesto] = useState({ asignado: 0, disponible: 0 });
+
+  // ── Gráfica por gerencia ──
+  const now = new Date();
+  const defaultMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [mesGerencia, setMesGerencia] = useState(defaultMes);
+  const [statsGerencia, setStatsGerencia] = useState([]);
+  const [setGerencia, setSetGerencia] = useState(0); // página/set actual
+  const SET_SIZE = 5; // gerencias por set
+
+  useEffect(() => {
+    const fetchStatsGerencia = async () => {
+      try {
+        const url = `http://${window.location.hostname}:5000/solicitudes/stats/gerencia?mes=${mesGerencia}`;
+        const res = await fetch(url, { credentials: 'include' });
+        if (res.ok) {
+          const json = await res.json();
+          setStatsGerencia(json.data || []);
+          setSetGerencia(0);
+        }
+      } catch (e) { console.error(e); }
+    };
+    fetchStatsGerencia();
+  }, [mesGerencia]);
+
+  const totalSets = Math.ceil(statsGerencia.length / SET_SIZE);
+  const currentSetData = statsGerencia.slice(setGerencia * SET_SIZE, (setGerencia + 1) * SET_SIZE);
+  const maxVal = Math.max(...statsGerencia.map(g => Number(g.total)), 1);
+
+  // Paleta de colores para las barras
+  const BAR_COLORS = ['#6366f1', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+
+  // Meses disponibles (12 meses atrás)
+  const mesesOpciones = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = d.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
+    return { val, label };
+  });
 
 
   // calculamos los valores de los "cards" con la información recibida del backend
@@ -315,9 +344,7 @@ const Dashboard = () => {
 
   return (
     <>
-      <Nav />
-      <Bg />
-      <Sidebar />
+
 
       <div className="z-10 ml-[60px] max-lg:ml-0 md:h-[calc(100dvh-60px)] h-auto bg-gray-50 flex overflow-hidden">
 
@@ -338,6 +365,7 @@ const Dashboard = () => {
               loading={loading}
               totalPages={Math.ceil(totalRecords / limit)}
               isAdmin={datauser?.data?.rol}
+              datauser={datauser}
               onPageChange={(newPage) => setPage(newPage)}
               onRefresh={() => setRefreshKey(prev => prev + 1)}
               onMessageSent={fetchMessages}
@@ -350,91 +378,127 @@ const Dashboard = () => {
             />
 
           </div>
+          <div className="col-start-4 relative col-end-6 row-start-1 row-end-10 flex flex-col min-h-0 w-full overflow-hidden bg-slate-50/40 backdrop-blur-sm gap-4 rounded-[32px] shadow-2xl p-5 border border-white/50">
 
-          <div className="col-start-4 relative col-end-6 row-start-1 row-end-10 flex flex-col w-full overflow-visible  bg-white/50 gap-4 rounded-2xl shadow-lg p-4">
-
-            <div className="flex items-center gap-2 ml-2  mb-4 shrink-0 absolute top-4 left-3">
-              <ChartBar className="w-5 h-5 text-emerald-500" />
-
-              <h2 className="font-bold text-slate-800">Distribución de Estados</h2>
-
+            {/* Header Principal con Glass Effect */}
+            <div className="flex items-center gap-3 ml-2 mb-6 shrink-0 absolute top-6 left-4 z-20">
+              <div className="p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/20 shadow-inner">
+                <ChartBar className="w-5 h-5 text-emerald-600 animate-pulse" />
+              </div>
+              <h2 className="font-black text-slate-800 tracking-tight text-lg">
+                Distribución <span className="text-emerald-600">de Estados</span>
+              </h2>
             </div>
 
-            <div className="mt-10">
-
-
+            {/* Contenedor de Info de Carros */}
+            <div className="mt-14 transition-all duration-500 transform hover:scale-[1.02]">
               <CarInfo data={stats} />
-
             </div>
 
-            <div className="relative flex-1 flex flex-col justify-between w-full h-full bg-white rounded-[24px] p-6 shadow-sm border border-slate-200 overflow-hidden transform transition-all group hover:shadow-md hover:border-blue-100">
+            {/* Card de Estadísticas por Gerencia */}
+            <div className="relative flex-1 min-h-0 flex flex-col w-full bg-white/90 backdrop-blur-md rounded-[30px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden transition-all duration-300 hover:shadow-[0_20px_50px_rgba(0,0,0,0.1)] hover:border-blue-200/50">
 
-              <div className="w-full text-center relative z-10 mb-4">
-                <div className="mx-auto w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                  <DollarSign className="w-5 h-5 text-blue-600" />
+              {/* Header Interno Estilizado */}
+              <div className="flex items-start justify-between mb-4 gap-2 shrink-0">
+                <div className="relative">
+                  <p className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] mb-1">Análisis Global</p>
+                  <p className="text-xl font-black text-slate-800 leading-none">Por Gerencia</p>
+                  <div className="absolute -bottom-2 left-0 w-8 h-1 bg-blue-500 rounded-full"></div>
                 </div>
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Presupuesto Asignado</p>
-                <p className="text-4xl font-mono font-black text-slate-800 tracking-tight">
-                  <span className="text-slate-400 text-2xl mr-1 font-semibold">$</span>
-                  {Number(presupuesto.asignado).toLocaleString('en-US')}
-                </p>
-                <p className="text-[10px] text-slate-400 mt-2 font-bold tracking-widest uppercase bg-slate-50 inline-block px-3 py-1 rounded-full border border-slate-100">
-                  {dataGerencias[0]?.nombre_gerencia}
-                </p>
+
+                <div className="group relative">
+                  <Select
+                    options={mesesOpciones}
+                    value={mesGerencia}
+                    onChange={e => setMesGerencia(e.target.value)}
+                    placeholder="Seleccionar"
+
+                  />
+
+                </div>
               </div>
 
-              {/* GRÁFICA DE BARRA APILADA (RECHARTS) */}
-              <div className="flex-1 w-full min-h-[90px] relative z-10 flex flex-col justify-center">
-                <div className="flex justify-between items-end mb-2 px-1">
-                  <div className="flex flex-col">
-                    <span className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Gastado</span>
-                    <span className="font-bold text-blue-700 text-sm">
-                      ${Number(presupuesto.asignado - presupuesto.disponible).toLocaleString()}
-                    </span>
+              {/* Lista de Barras */}
+              <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto py-1 pr-0.5">
+                {currentSetData.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-300 italic gap-2">
+                    <div className="w-12 h-12 rounded-full border-2 border-dashed border-slate-200 flex items-center justify-center">!</div>
+                    <span className="text-xs font-medium">No hay registros este mes</span>
                   </div>
-                  <div className="flex flex-col text-right">
-                    <span className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Disponible</span>
-                    <span className="font-bold text-blue-500 text-sm">
-                      ${Number(presupuesto.disponible).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
+                ) : (
+                  currentSetData.map((g, i) => {
+                    const pct = maxVal > 0 ? Math.round((Number(g.total) / maxVal) * 100) : 0;
+                    return (
+                      <div key={g.id_gerencia} className="group flex flex-col gap-2 transition-all duration-300">
+                        <div className="flex justify-between items-end">
+                          <span className="text-xs font-bold text-slate-700 group-hover:text-blue-600 transition-colors truncate max-w-[80%] flex items-center gap-2">
+                            <span className="w-1 h-1 rounded-full bg-slate-300 group-hover:bg-blue-500"></span>
+                            {g.nombre_gerencia}
+                          </span>
+                          <span className="text-xs font-black text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md group-hover:bg-blue-600 group-hover:text-white transition-all">
+                            {g.total}
+                          </span>
+                        </div>
+                        <div className="h-3 w-full bg-slate-100 rounded-full p-[2px] shadow-inner">
+                          <div
+                            className="h-full rounded-full transition-all duration-1000 ease-out relative shadow-lg"
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: BAR_COLORS[i % BAR_COLORS.length],
+                              boxShadow: `0 0 10px ${BAR_COLORS[i % BAR_COLORS.length]}40`
+                            }}
+                          >
+                            <div className="absolute top-0 right-0 h-full w-2 bg-white/20 rounded-full"></div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
 
-                <div className="h-[40px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      layout="vertical"
-                      data={[{
-                        name: 'Presupuesto',
-                        Gastado: Math.max(0, presupuesto.asignado - presupuesto.disponible),
-                        Disponible: Math.max(0, presupuesto.disponible)
-                      }]}
-                      margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-                    >
-                      <XAxis type="number" hide />
-                      <YAxis type="category" dataKey="name" hide />
-                      <Tooltip
-                        formatter={(value) => `$${value.toLocaleString()}`}
-                        cursor={false}
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+              {/* Navegación Estilo "Pill" */}
+              {totalSets > 1 && (
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-100/60">
+                  <button
+                    onClick={() => setSetGerencia(s => Math.max(0, s - 1))}
+                    disabled={setGerencia === 0}
+                    className="p-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 hover:shadow-lg disabled:opacity-20 disabled:hover:shadow-none transition-all"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+
+                  <div className="flex gap-1.5 bg-slate-50 px-3 py-2 rounded-full border border-slate-100">
+                    {Array.from({ length: totalSets }).map((_, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setSetGerencia(idx)}
+                        className={`rounded-full transition-all duration-500 ${setGerencia === idx ? 'bg-blue-600 w-6 h-2 shadow-lg shadow-blue-200' : 'bg-slate-300 w-2 h-2 hover:bg-slate-400'}`}
                       />
-                      {/* StackId="a" hace que se apilen como progreso */}
-                      <Bar dataKey="Gastado" stackId="a" fill="#1447e6" radius={[8, 0, 0, 8]} animationDuration={1500} />
-                      <Bar dataKey="Disponible" stackId="a" fill="#2b7fff" radius={[0, 8, 8, 0]} animationDuration={1500} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                    ))}
+                  </div>
 
-                <div className="mt-3 text-center">
-                  <span className="text-xs text-slate-500 font-medium">Consumo total: </span>
-                  <span className="text-sm text-slate-800 font-extrabold ml-1">
-                    {presupuesto.asignado > 0 ? Math.round(((presupuesto.asignado - presupuesto.disponible) / presupuesto.asignado) * 100) : 0}%
-                  </span>
+                  <button
+                    onClick={() => setSetGerencia(s => Math.min(totalSets - 1, s + 1))}
+                    disabled={setGerencia === totalSets - 1}
+                    className="p-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 hover:shadow-lg disabled:opacity-20 transition-all"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                  </button>
                 </div>
+              )}
+
+              {/* Footer Meta-Data */}
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <span className="h-[1px] flex-1 bg-gradient-to-r from-transparent to-slate-100"></span>
+                <p className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-tighter">
+                  Visualizando {setGerencia * SET_SIZE + 1} – {Math.min((setGerencia + 1) * SET_SIZE, statsGerencia.length)}
+                </p>
+                <span className="h-[1px] flex-1 bg-gradient-to-l from-transparent to-slate-100"></span>
               </div>
-
             </div>
           </div>
+
 
 
 

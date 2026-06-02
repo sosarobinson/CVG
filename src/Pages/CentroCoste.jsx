@@ -18,8 +18,14 @@ const CentroCostes = () => {
     const [users, setUsers] = useState([]);
     const [gerencias, setGerencias] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [loadingGerencias, setLoadingGerencias] = useState(false);
     const [GerenciasPresupuesto, setGerenciasPresupuesto] = useState([]);
     const isAdmin = datauser?.data?.isAdmin || false;
+
+    // Estados de paginación para Gerencias
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const limit = 10;
 
     // Estados de filtros
     const [selectedGerencia, setSelectedGerencia] = useState("");
@@ -27,24 +33,27 @@ const CentroCostes = () => {
     const [valorBusqueda, setValorBusqueda] = useState("");
     const [isUserorGerencia, setIsUserorGerencia] = useState(true);
 
+    const fetchGerencias = useCallback(async () => {
+        try {
+            setLoadingGerencias(true);
+            const response = await fetch(`http://${window.location.hostname}:5000/gerencias?page=${currentPage}&limit=${limit}`, {
+                credentials: 'include'
+            });
+            const data = await response.json();
+            setGerenciasPresupuesto(data.gerencias);
+            setTotalPages(data.totalPages || 1);
+        } catch (error) {
+            console.error('Error al obtener gerencias:', error);
+        } finally {
+            setLoadingGerencias(false);
+        }
+    }, [currentPage, limit]);
+
     useEffect(() => {
-        const fetchGerencias = async () => {
-            try {
-                const response = await fetch(`http://${window.location.hostname}:5000/gerencias`, {
-                    credentials: 'include'
-                });
-                const data = await response.json();
-                setGerenciasPresupuesto(data.gerencias);
-
-            } catch (error) {
-                console.error('Error al obtener gerencias:', error);
-            }
-        };
-
         fetchGerencias();
-    }, []);
+    }, [fetchGerencias]);
 
-    // 1. Cargar Contexto Inicial (Gerencias)
+    // 1. Cargar Contexto Inicial (Gerencias) para el filtro
     useEffect(() => {
         const hostname = window.location.hostname;
         fetch(`http://${hostname}:5000/context`, { credentials: 'include' })
@@ -59,7 +68,7 @@ const CentroCostes = () => {
             .catch(err => console.error("Error al cargar contexto:", err));
     }, []);
 
-    // 2. Función de Petición al Backend (Filtrado Server-side)
+    // 2. Función de Petición al Backend (Filtrado Server-side para usuarios u otros)
     const fetchFilteredData = useCallback(() => {
         setLoading(true);
         const hostname = window.location.hostname;
@@ -98,16 +107,14 @@ const CentroCostes = () => {
 
     return (
         <>
-            <Nav />
-            <Bg />
-            <Sidebar />
+
 
             <div className="z-10 ml-[60px] max-lg:ml-0 md:h-[calc(100dvh-60px)] h-auto bg-gray-50 flex overflow-hidden">
 
                 <div className="grid max-lg:flex max-lg:flex-col   max-lg:pb-40 overflow-hidden h-screen max-lg:overflow-y-auto  z-10 grid-cols-5 grid-rows-10 gap-2  w-full p-2 iten  ">
 
                     <div className="col-start-1  col-end-4 row-start-1 row-end-10 relative max-lg:calc(90vh-140px)] flex flex-col pt-3">
-                        {loading && (
+                        {(loading || loadingGerencias) && (
                             <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-20 flex items-center justify-center">
                                 <div className="flex flex-col items-center gap-2">
                                     <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -120,7 +127,10 @@ const CentroCostes = () => {
 
                         <TablaGerencias
                             gerencias={GerenciasPresupuesto}
-                            loading={loading}
+                            loading={loadingGerencias}
+                            currentPage={currentPage}
+                            totalPages={totalPages}
+                            onPageChange={(page) => setCurrentPage(page)}
                         />
 
 

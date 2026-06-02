@@ -2,9 +2,13 @@
 import React, { useEffect, useState } from "react";
 import { MessageSquare, Bell, X, CheckCircle2, AlertCircle, Clock } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../Avatar";
+import { saneaFecha } from "../../utils";
+import UserCarrucel from "../componentes dashboard/UserCarrucel";
 import { useAuth } from "../../Constext/AuthToken";
 import ChatPopup from "./Chat";
 import { SocketProvider } from "../../Constext/SocketContext";
+import ConfirmationModal from '../Confirmacion';
+import { toast } from '../GoeyToaster';
 
 
 
@@ -23,12 +27,13 @@ const Close = ({ onClose }) => {
 
 
 
-export const Mensageria = ({ onClose, onSelectUser, notifications = [] }) => {
-  const { datauser } = useAuth();
+export const Mensageria = ({ onClose, onSelectUser, notifications = [], onDeleteNotification }) => {
+  const { datauser,userId } = useAuth();
   const [show, setShow] = useState(false);
   const [activeTab, setActiveTab] = useState("messages");
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
 
   useEffect(() => {
@@ -36,37 +41,29 @@ export const Mensageria = ({ onClose, onSelectUser, notifications = [] }) => {
     const fetchChats = async () => {
 
       try {
-
         setLoading(true);
 
         const base = `http://${window.location.hostname}:5000`;
-
         const resp = await fetch(`${base}/chats`, { credentials: 'include' });
+        const result = await resp.json().catch(() => ({}));
 
-        const result = await resp.json();
-
-        if (resp.ok && result.mensaje) {
-
-          setChats(result.mensaje.map(m => ({
-
+          if (resp.ok && result.mensaje) {
+          const normalized = result.mensaje.map(m => ({
             ...m,
+            isGroup: !!m.isGroup || !!m.idSolicitud || !!m.id_solicitud || !!m.idSolicitud,
+            time: saneaFecha(m.time || m.fecha_ultimo_mensaje || m.fecha_envio || new Date().toISOString()),
+            unread: !!m.unread || (m.view === 0 && m.id_emisor !== (datauser?.data?.id_usuario || datauser?.userId))
+          }));
 
-            time: m.time || new Date(m.fecha_envio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-
-            unread: m.unread || false
-
-          })));
-
+          setChats(normalized);
+        } else {
+          setChats([]);
         }
 
       } catch (err) {
-
-        console.error('Error:', err);
-
+        console.error('Error fetching chats:', err);
       } finally {
-
         setLoading(false);
-
       }
 
     };
@@ -87,6 +84,24 @@ export const Mensageria = ({ onClose, onSelectUser, notifications = [] }) => {
 
     setTimeout(() => onClose(), 300);
 
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) return;
+    if (!onDeleteNotification) {
+      setPendingDelete(null);
+      return;
+    }
+    try {
+      const ok = await onDeleteNotification(pendingDelete.id_notificacion);
+      if (ok) toast.success('Notificación eliminada');
+      else toast.error('No se pudo eliminar la notificación');
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al eliminar la notificación');
+    } finally {
+      setPendingDelete(null);
+    }
   };
 
 
@@ -167,25 +182,15 @@ export const Mensageria = ({ onClose, onSelectUser, notifications = [] }) => {
             <div className="space-y-3">
               {notifications.length > 0 ? (
                 notifications.map((notif, idx) => {
-                  const fecha = new Date(notif.fecha);
-                  const hoy = new Date();
-                  const diffMinutos = Math.floor((hoy - fecha) / 60000);
-                  const timeStr = diffMinutos < 60
-                    ? `${diffMinutos}m`
-                    : diffMinutos < 1440
-                      ? `${Math.floor(diffMinutos / 60)}h`
-                      : `${Math.floor(diffMinutos / 1440)}d`;
-
-                  const parsedType = notif.status === 'ok' ? 'success' : notif.status === 'error' ? 'warning' : 'info';
-                  const title = notif.resumen ? `${notif.resumen}` : 'Notificación de Compra';
+                  const timeStr = saneaFecha(notif.fecha);
 
                   return (
                     <NotificationItem
                       key={notif.id_notificacion || idx}
-                      type={parsedType}
-                      title={title}
-                      desc={notif.contenido}
+                      notif={notif}
                       time={timeStr}
+                      onDelete={onDeleteNotification}
+                      onRequestDelete={(n) => setPendingDelete(n)}
                     />
                   );
                 })
@@ -198,7 +203,17 @@ export const Mensageria = ({ onClose, onSelectUser, notifications = [] }) => {
             </div>
           )}
         </div>
+        {/* Confirmation modal for deleting notifications */}
+      
       </div>
+        <ConfirmationModal
+          isOpen={!!pendingDelete}
+          title="Eliminar notificación?"
+          message={pendingDelete?.contenido || '¿Eliminar esta notificación?'}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setPendingDelete(null)}
+          type="danger"
+        />
     </div>
   );
 };
@@ -206,22 +221,74 @@ export const Mensageria = ({ onClose, onSelectUser, notifications = [] }) => {
 // Sub-componente para Items de Mensaje
 const MessageItem = ({ chat, authUser, onSelect }) => {
   const currentUser = authUser?.data || authUser;
-  const contact = currentUser?.id_usuario === chat.to.id ? chat.from : chat.to;
-  const isMe = currentUser?.id_usuario === chat.from.id;
+  const isGroup = !!chat.isGroup || !!chat.idSolicitud || !!chat.id_solicitud;
+
+  const contact = isGroup
+    ? { id: chat.chatId, name: chat.name || chat.referencia_solicitud || `Solicitud #${chat.id_solicitud || chat.idSolicitud}`, avatar: chat.avatar, isGroup: true, idSolicitud: chat.idSolicitud || chat.id_solicitud }
+    : (currentUser?.id_usuario === chat.to?.id ? chat.from : chat.to);
+
+  const isMe = !isGroup && currentUser?.id_usuario === chat.from?.id;
+
+  const [participants, setParticipants] = useState([]);
+  const [partsLoading, setPartsLoading] = useState(false);
+
+  const getInitials = (name) => {
+    if (!name) return '';
+    return name.split(' ').filter(Boolean).map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const idSol = chat.idSolicitud || chat.id_solicitud;
+    if (!isGroup || !idSol) return;
+    setPartsLoading(true);
+    const base = `http://${window.location.hostname}:5000`;
+    fetch(`${base}/solicitudes/${idSol}/participants`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => {
+        if (!mounted) return;
+        if (j && j.participants) {
+          const users = j.participants.map(u => ({
+            id: u.id_usuario,
+            avatar: u.avatar || null,
+            name: u.nombres || u.name || `${u.nombres || ''} ${u.apellidos || ''}`.trim(),
+            initials: getInitials(u.nombres || (u.name || `${u.nombres || ''} ${u.apellidos || ''}`))
+          }));
+          setParticipants(users);
+        } else {
+          setParticipants([]);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching participants:', err);
+        if (mounted) setParticipants([]);
+      })
+      .finally(() => mounted && setPartsLoading(false));
+
+    return () => { mounted = false; };
+  }, [chat.idSolicitud, chat.id_solicitud]);
 
   return (
     <div
       onClick={() => onSelect(contact, chat.chatId)}
       className={`group flex items-center gap-4 p-3 rounded-2xl transition-all cursor-pointer border border-transparent hover:border-blue-100 hover:bg-blue-50/30 ${chat.unread ? 'bg-blue-50/60 shadow-sm' : ''}`}
     >
-      <div className="relative">
-        <Avatar className="h-12 w-12 border-2 border-white shadow-sm">
-          <AvatarImage src={contact.avatar} className="object-cover" />
-          <AvatarFallback className="bg-slate-200 text-slate-600 font-bold">{contact.name?.charAt(0)}</AvatarFallback>
-        </Avatar>
-        {chat.unread && <span className="absolute -top-1 -right-1 h-4 w-4 bg-blue-600 rounded-full border-2 border-white" />}
+      <div className="relative shrink-0 w-fit ">
+        {isGroup ? (
+          <div className="w-15 h-fit flex justify-center items-center ">
+            <UserCarrucel users={participants} loading={partsLoading} datauser={authUser} interactive={false} />
+          </div>
+        ) : (
+          <div className="flex justify-center items-center  w-15">
+            <Avatar className=" border-2 border-white shadow-sm">
+              <AvatarImage src={contact.avatar} className="object-cover" />
+              <AvatarFallback className="bg-slate-200 text-slate-600 font-bold">{(contact.name || '').substring(0, 2).toUpperCase()}</AvatarFallback>
+            </Avatar>
+          </div>
+        )}
+       
       </div>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 relative min-w-0">
         <div className="flex justify-between items-center mb-0.5">
           <h4 className={`text-sm truncate ${chat.unread ? 'font-black text-slate-900' : 'font-bold text-slate-700'}`}>{contact.name}</h4>
           <span className="text-[10px] font-bold text-slate-400">{chat.time}</span>
@@ -230,34 +297,58 @@ const MessageItem = ({ chat, authUser, onSelect }) => {
           {isMe && <span className="text-blue-500 font-bold">Tú: </span>}
           {chat.mensaje}
         </p>
+       {chat.unread && <span className="absolute -bottom-1 -right-1 h-4 w-4 bg-blue-600 rounded-full border-2 border-white" />}
       </div>
     </div>
   );
 };
 
 // Sub-componente para Items de Notificación
-const NotificationItem = ({ type, title, desc, time }) => {
+const NotificationItem = ({ notif, onDelete, onRequestDelete, time }) => {
   const icons = {
     success: <CheckCircle2 className="w-4 h-4 text-emerald-500" />,
     warning: <AlertCircle className="w-4 h-4 text-amber-500" />,
     info: <Clock className="w-4 h-4 text-blue-500" />
   };
 
+  const parsedType = notif.status === 'ok' ? 'success' : notif.status === 'error' ? 'warning' : 'info';
+  const title = notif.resumen ? `${notif.resumen}` : 'Notificación de Compra';
+
+  const handleDelete = async () => {
+    if (onRequestDelete) {
+      return onRequestDelete(notif);
+    }
+    if (!onDelete) return;
+    if (!notif?.id_notificacion) return;
+    const ok = window.confirm('¿Eliminar esta notificación?');
+    if (!ok) return;
+    await onDelete(notif.id_notificacion);
+  };
+
   return (
     <div className="flex gap-4 p-4 rounded-2xl bg-slate-50/50 border border-slate-100 hover:border-slate-200 transition-all group">
-      <div className={`mt-1 p-2 rounded-xl h-fit ${type === 'success' ? 'bg-emerald-100/50' : 'bg-amber-100/50'}`}>
-        {icons[type]}
+      <div className={`mt-1 p-2 rounded-xl h-fit ${parsedType === 'success' ? 'bg-emerald-100/50' : 'bg-amber-100/50'}`}>
+        {icons[parsedType]}
       </div>
       <div className="flex-1">
         <div className="flex justify-between items-start mb-1">
           <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight">{title}</h4>
-          <span className="text-[9px] font-bold text-slate-400">{time}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-bold text-slate-400">{time}</span>
+            <button onClick={handleDelete} title="Eliminar" className="text-slate-400 hover:text-red-500">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <p className="text-xs text-slate-600 leading-relaxed">{desc}</p>
+        <p className="text-xs text-slate-600 leading-relaxed">{notif.contenido}</p>
       </div>
     </div>
   );
 };
+
+// Confirmación global para eliminar notificación
+// (Se renderiza dentro del componente principal mediante estado `pendingDelete`)
+
 
 const EmptyState = ({ icon, text }) => (
   <div className="flex flex-col items-center justify-center py-20 text-slate-300">
@@ -283,7 +374,7 @@ export const CarMESAJES = ({ users, onSelectUser }) => {
               // ESTO PERMITE QUE ABRA EL CHATPOPUP
               onClick={() => onSelectUser(contact, item.chatId)}
             >
-              <Avatar size="default" className="shrink-0 mt-0.5 border border-gray-100 shadow-sm relative">
+              <Avatar size="default" className="shrink-0 mt-0.5 border w-fit border-gray-100 shadow-sm relative">
                 <AvatarImage src={`${item.avatar}`} alt={item.name} />
                 <AvatarFallback className="bg-blue-100 text-blue-600 font-medium">
                   {item.name.substring(0, 2).toUpperCase()}
@@ -291,7 +382,7 @@ export const CarMESAJES = ({ users, onSelectUser }) => {
 
               </Avatar>
 
-              <div className="flex flex-col flex-1 min-w-0 max-h-10">
+              <div className="flex flex-col  max-h-10">
                 <div className="flex justify-between items-baseline gap-2">
                   <span className={`text-[14px] truncate ${isUnread ? 'font-bold text-gray-900' : 'font-semibold text-gray-800'}`}>
                     {item.name}

@@ -6,6 +6,8 @@ import { Avatar } from './Avatar.jsx';
 import { Mensageria } from './Mensajeria/Mensageria.jsx';
 import BotonBandeja from './Mensajeria/BotonBandeja.jsx';
 import { useSocket } from '../Constext/SocketContext.jsx';
+import { Link } from 'react-router-dom';
+import ProfileModal from './ProfileModal.jsx';
 
 
 
@@ -13,10 +15,12 @@ import { useSocket } from '../Constext/SocketContext.jsx';
 export default function Nav() {
 
 
-  const { isAuthenticated, logout, getDataUser, datauser } = useAuth();
+  const { isAuthenticated, logout, getDataUser, datauser, permiso } = useAuth();
   const { globalMessages, joinChat, globalNotifications } = useSocket();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isBandejaOpen, setIsBandejaOpen] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [fullProfile, setFullProfile] = useState(null);
   const [selectedChatUser, setSelectedChatUser] = useState(null);
   const [newAlert, setNewAlert] = useState(false);
   const [dbNotifications, setDbNotifications] = useState([]);
@@ -33,16 +37,29 @@ export default function Nav() {
     }
   }
 
+  const effectiveRole = Number(fullProfile?.id_rol ?? permiso?.id_rol ?? datauser?.data?.id_rol ?? 0);
+  const isAdminFlag = Boolean(datauser?.data?.isAdmin) || [1, 5].includes(effectiveRole);
+  const canCreateUser = isAdminFlag;
+
   useEffect(() => {
-
-    if (isAuthenticated && !datauser) {
-      getDataUser();
-
-    }
-
-
-
+    if (isAuthenticated && !datauser) getDataUser();
   }, [isAuthenticated, datauser, getDataUser]);
+
+  useEffect(() => {
+    // Cuando se abre el menú, cargar perfil completo (con gerencia, teléfono, etc.)
+    if (!isMenuOpen || !datauser) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const base = `http://${window.location.hostname}:5000`;
+        const resp = await fetch(`${base}/users?columna=id_usuario&busqueda=${datauser.userId}`, { credentials: 'include' });
+        if (!resp.ok) return;
+        const j = await resp.json();
+        if (mounted) setFullProfile((j.usuarios && j.usuarios[0]) || null);
+      } catch (e) { console.error('Error cargando perfil completo', e); }
+    })();
+    return () => { mounted = false; };
+  }, [isMenuOpen, datauser]);
 
 
   useEffect(() => {
@@ -73,6 +90,28 @@ export default function Nav() {
       fetchData();
     }
   }, [isAuthenticated]);
+
+  const handleDeleteNotification = async (id) => {
+    const idNum = Number(id);
+    if (!Number.isFinite(idNum) || idNum <= 0) {
+      console.warn('handleDeleteNotification: id inválido', id);
+      return false;
+    }
+    try {
+      const base = `http://${window.location.hostname}:5000`;
+      const resp = await fetch(`${base}/notificaciones/${idNum}`, { method: 'DELETE', credentials: 'include' });
+      if (resp.ok) {
+        setDbNotifications(prev => prev.filter(n => Number(n.id_notificacion) !== idNum));
+        return true;
+      }
+      const j = await resp.json().catch(() => ({}));
+      console.error('Error deleting notification:', j);
+      return false;
+    } catch (err) {
+      console.error('Error deleting notification:', err);
+      return false;
+    }
+  };
 
   useEffect(() => {
     if (globalMessages && globalMessages.length > 0) {
@@ -175,13 +214,16 @@ export default function Nav() {
         onClose={() => setIsBandejaOpen(false)}
         onSelectUser={handleSelectUser}
         notifications={dbNotifications}
+        onDeleteNotification={handleDeleteNotification}
       />
       }
 
       {selectedChatUser && (
         <ChatPopup
           user={selectedChatUser}
-          datauser={datauser?.data} // Pasamos la info del usuario logueado
+          datauser={datauser?.data}
+          userId={datauser?.userId}
+          // Pasamos la info del usuario logueado
           onClose={() => setSelectedChatUser(null)}
           newAlert={newAlert}
           setNewAlert={setNewAlert}
@@ -200,12 +242,17 @@ export default function Nav() {
               <div>
                 <p className="text-sm font-bold text-gray-900">{datauser.data.name}</p>
                 <p className="text-xs text-gray-500">{datauser.data.email}</p>
+             
               </div>
             </div>
             <div className="flex p-2 justify-between items-center text-xs text-blue-600/80">
               <span>Rol:</span>
               <span className="font-semibold">{datauser.data.rol}</span>
             </div>
+              <div className="flex p-2 justify-between items-center text-xs text-blue-600/80">
+                <span>Gerencia</span>
+                <span className="font-semibold">{fullProfile?.nombre_gerencia || '—'}</span>
+              </div>
             <div className="bg-blue-50/50 rounded-lg p-2.5">
               <p className="text-xs font-medium text-blue-800 mb-1">Estado de la Sesión</p>
               <div className="flex justify-between items-center text-xs text-blue-600/80">
@@ -221,7 +268,16 @@ export default function Nav() {
             </div>
           </div>
 
+          {!canCreateUser && (
+            <div className="px-4 py-2 text-xs text-amber-600">No tienes permiso para crear usuarios. Rol detectado: <span className="font-semibold text-amber-800">{effectiveRole || '—'}</span>{fullProfile?.id_rol ? <span className="text-xs ml-2 text-slate-500">(perfil:{fullProfile.id_rol})</span> : null}</div>
+          )}
+
+          <div className="px-2 mb-2">
+            <button onClick={() => { setShowProfileModal(true); setIsMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors duration-200">Ver Perfil</button>
+          </div>
+
           <div className="p-1">
+
             <button
               onClick={() => {
                 logout();
@@ -239,6 +295,7 @@ export default function Nav() {
           </div>
         </div>
       )}
+      {showProfileModal && <ProfileModal open={showProfileModal} onClose={() => setShowProfileModal(false)} />}
     </>
   )
 }

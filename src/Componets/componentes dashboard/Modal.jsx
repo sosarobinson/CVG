@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 
-const Close = ({ onClose }) => (
-  <button onClick={onClose} className="absolute top-4 right-6 group z-10">
+const Close = ({ onClose, hidden, className }) => (
+  <button onClick={onClose} className={`${hidden ? 'hidden' : ''} ${className} absolute top-4 right-6 group z-10`}>
     <svg
       className="transition-transform duration-300 group-hover:scale-110 stroke-blue-600"
       xmlns="http://www.w3.org/2000/svg" width={24} height={24} viewBox="0 0 24 24"
@@ -13,40 +13,84 @@ const Close = ({ onClose }) => (
   </button>
 );
 
-const Modal = ({ onClose, contenido }) => {
+const Modal = ({ onClose, hidden = false, contenido, padding = true, title, fullscreen = false }) => {
+
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    // Al montar, activamos la clase de CSS
     const timer = setTimeout(() => setIsMounted(true), 10);
     return () => clearTimeout(timer);
   }, []);
 
   const handleClose = () => {
-    setIsMounted(false); // Inicia animación de salida en CSS
-    setTimeout(onClose, 300); // Desmonta el componente tras la animación
+    setIsMounted(false);
+    setTimeout(onClose, 300);
   };
 
   return (
     <div
-      className={`fixed  inset-0 custom-scrollbar z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] modal-overlay ${isMounted ? 'active' : ''}`}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] modal-overlay ${isMounted ? 'active' : ''}`}
       onClick={handleClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         className={`
-          bg-white relative rounded-2xl shadow-2xl modal-content
-          min-w-[400px] min-h-[400px] max-sm:w-full max-sm:h-full
-          flex flex-col custom-scrollbar
+          bg-white relative shadow-2xl modal-content
+          flex flex-col 
+          ${fullscreen ? 'w-full h-full rounded-none' : 'rounded-2xl min-w-[400px] min-h-[400px] max-sm:w-full max-sm:h-full'}
         `}
       >
-        <Close onClose={handleClose} />
-        <div className="p-8 w-full h-full ">
+        {title && (
+          <div className="px-8 py-4 border-b border-slate-100">
+            <h2 className="text-lg font-bold text-slate-800">{title}</h2>
+          </div>
+        )}
+        <Close onClose={handleClose} hidden={hidden} />
+
+        {/* Contenedor de contenido optimizado */}
+        <div className={`w-full h-full custom-scrollbar ${padding ? 'p-8' : 'p-0'}`}>
           {contenido}
         </div>
       </div>
     </div>
   );
 };
+const FullModal = ({ onClose, contenido, hidden = false, padding = true, title, fullscreen = false }) => {
+  const [isMounted, setIsMounted] = useState(false);
 
-export { Modal };
+  useEffect(() => {
+    const timer = setTimeout(() => setIsMounted(true), 10);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleClose = () => {
+    setIsMounted(false);
+    setTimeout(onClose, 300);
+  };
+
+  return (
+    <div
+      className={`fixed  inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] modal-overlay ${isMounted ? 'active' : ''} `}
+      onClick={handleClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`
+          bg-white relative shadow-2xl modal-content
+          flex flex-col 
+          w-dvw h-full rounded-none
+        `}
+      >
+
+        <Close onClose={handleClose} className='hidden' />
+
+        {/* Contenedor de contenido optimizado */}
+        <div className={`w-full h-full custom-scrollbar ${padding ? 'p-8' : 'p-0'}`}>
+          {contenido}
+        </div>
+      </div>
+    </div>
+  );
+
+}
+export { Modal, FullModal };

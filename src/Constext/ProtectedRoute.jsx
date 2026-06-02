@@ -7,10 +7,11 @@ const ProtectedRoute = () => {
     const location = useLocation();
     if (loading) {
         return (
-            <div className="flex justify-center items-center min-h-screen bg-gray-50">
-                <div className="text-xl font-semibold text-blue-700">Cargando estado de la sesión...</div>
+            <div className="z-10 ml-[60px] max-lg:ml-0 h-[calc(100vh-60px)] flex flex-col justify-center items-center w-full">
+                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                <div className="text-lg font-semibold text-blue-700">Cargando estado de la sesión...</div>
             </div>
-        ); // O un spinner
+        );
     }
 
 

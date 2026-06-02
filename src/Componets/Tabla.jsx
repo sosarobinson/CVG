@@ -42,7 +42,6 @@ const Tabla = ({ className }) => {
         { key: 'nombre_gerencia', label: 'Gerencia' },
         { key: 'nombre_completo', label: "Solicitante" },
         { key: 'justificacion', label: 'Justificación' },
-        { key: 'monto_estimado', label: 'Monto' },
         { key: 'estado', label: 'Estado' },
         { key: 'fecha_creacion', label: 'Fecha' }
     ];
@@ -113,7 +112,6 @@ const Tabla = ({ className }) => {
                                     </td>
                                     <td className="px-6 py-4">{row.nombre_completo}</td>
                                     <td className="px-6 py-4 max-w-xs truncate">{row.justificacion}</td>
-                                    <td className="px-6 py-4 font-mono text-green-600">${Number(row.monto_estimado).toLocaleString()}</td>
                                     <td className="px-6 py-4">
                                         <span className={cn(
                                             "px-2.5 py-1 rounded-full text-xs font-bold",

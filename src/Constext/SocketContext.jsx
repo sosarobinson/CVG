@@ -24,7 +24,20 @@ export const SocketProvider = ({ children }) => {
 
       socketRef.current.on('receive_message', (data) => {
         console.log('📩 Mensaje recibido en Global:', data);
-        setGlobalMessages((prev) => [...prev, data]);
+        setGlobalMessages((prev) => {
+          const incomingId = data?.id_mensaje ?? data?.idMensaje ?? data?.id ?? null;
+          if (incomingId && prev.some(p => (p?.id_mensaje ?? p?.idMensaje ?? p?.id ?? null) == incomingId)) return prev;
+          return [...prev, data];
+        });
+      });
+
+      socketRef.current.on('nuevo_mensaje', (data) => {
+        console.log('📨 Nuevo mensaje de solicitud (grupo):', data);
+        setGlobalMessages((prev) => {
+          const incomingId = data?.id_mensaje ?? data?.idMensaje ?? data?.id ?? null;
+          if (incomingId && prev.some(p => (p?.id_mensaje ?? p?.idMensaje ?? p?.id ?? null) == incomingId)) return prev;
+          return [...prev, data];
+        });
       });
 
       socketRef.current.on('receive_notification', (data) => {
@@ -75,7 +88,19 @@ export const SocketProvider = ({ children }) => {
 export const useSocket = () => {
   const context = useContext(SocketContext);
   if (!context) {
-    throw new Error('useSocket debe ser utilizado dentro de un SocketProvider');
+    // Proveer fallback seguro para evitar que la app se rompa si el provider no está presente.
+    // Esto permite que componentes que usan `useSocket` sigan funcionando (sin realtime).
+    // También ayuda durante el render en páginas públicas donde el provider podría no envolver todo.
+    console.warn('useSocket: SocketProvider no encontrado — devolviendo fallback seguro.');
+    return {
+      socket: null,
+      globalMessages: [],
+      globalNotifications: [],
+      joinChat: () => {},
+      sendMessage: () => {},
+      clearGlobalMessages: () => {},
+      clearGlobalNotifications: () => {}
+    };
   }
   return context;
 };

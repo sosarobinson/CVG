@@ -93,7 +93,7 @@ export function AvatarGroupCount({
 }) {
   const sizeClasses = {
     sm: "size-6 text-[10px]",
-    default: "size-8 text-sm",
+    default: "size-[30px] text-sm",
     lg: "size-10 text-base",
   };
 
@@ -103,7 +103,7 @@ export function AvatarGroupCount({
       // Validación simple: si 'funcion' existe, úsala; si no, haz nada.
       onClick={() => funcion && funcion()} 
       className={clsx(
-        "bg-white/50 backdrop-blur-xs border-gray-600/50 text-gray-900/50  cursor-pointer  relative flex shrink-0 items-center justify-center rounded-full font-medium ring-2 transition-transform active:scale-95",
+        "bg-white/50 rounded-full backdrop-blur-xs  border-gray-600/50 text-gray-900/50  cursor-pointer  relative flex shrink-0 items-center justify-center  font-medium ring-2 transition-transform active:scale-95",
         sizeClasses[size],
         className
       )}

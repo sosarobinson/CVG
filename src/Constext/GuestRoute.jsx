@@ -14,7 +14,7 @@ const GuestRoute = () => {
     // 1. Manejo del estado de carga 
     if (loading) {
         return (
-            <div className="flex justify-center items-center min-h-screen bg-gray-50">
+            <div className="flex justify-center items-center min-h-screen bg-white">
                 <div className="text-xl font-semibold text-blue-700">Cargando estado de la sesión...</div>
             </div>
         );

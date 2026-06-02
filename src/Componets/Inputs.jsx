@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Bold, Italic, HelpCircle, Heading1, Heading2, List, Link, Image, Code, Eye, EyeOff } from 'lucide-react';
 
 /**
  * Lógica compartida para determinar si el label debe estar arriba.
@@ -164,7 +165,7 @@ const InputNumber = ({ label, name, defaultValue, onChange, step = 1, min = 0 })
   );
 };
 
-const TextArea = ({ label, name, defaultValue, onChange }) => {
+const TextArea = ({ label, name, defaultValue, onChange, className }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [hasContent, setHasContent] = useState(!!defaultValue);
   const textareaRef = useRef(null);
@@ -180,7 +181,7 @@ const TextArea = ({ label, name, defaultValue, onChange }) => {
   };
 
   return (
-    <div className="relative mt-2 mb-1 block">
+    <div className="relative mt-2 mb-1 block w-full">
       <textarea
         ref={textareaRef}
         name={name}
@@ -189,7 +190,7 @@ const TextArea = ({ label, name, defaultValue, onChange }) => {
         onFocus={() => setIsFocused(true)}
         onBlur={handleBlur}
         className={`h-32 py-3 w-full min-w-80 bg-white text-gray-800 px-4 border rounded-xl outline-none transition-all duration-300 resize-none
-          ${isFocused || hasContent ? 'border-blue-500 ring-1 ring-blue-500/20' : 'border-slate-300'}`}
+          ${isFocused || hasContent ? 'border-blue-500 ring-1 ring-blue-500/20' : 'border-slate-300'} ${className || ''}`}
       />
       <label
         className={`absolute left-4 px-1 transition-all duration-300 pointer-events-none select-none bg-white
@@ -203,6 +204,312 @@ const TextArea = ({ label, name, defaultValue, onChange }) => {
   );
 };
 
+const MarkdownEditor = ({ label, name, defaultValue, value, onChange }) => {
+  const [text, setText] = useState(defaultValue || value || '');
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
+  const [showHelp, setShowHelp] = useState(false);
+  const editorRef = useRef(null);
+
+  useEffect(() => {
+    if (value !== undefined) {
+      setText(value);
+    }
+  }, [value]);
+
+  const handleKeyDown = (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      switch (e.key) {
+        case 'b':
+        case 'B':
+          e.preventDefault();
+          insertFormat('**', '**', 'texto en negrita');
+          break;
+        case 'i':
+        case 'I':
+          e.preventDefault();
+          insertFormat('*', '*', 'texto en cursiva');
+          break;
+        default:
+          break;
+      }
+    }
+  };
+
+  const handleEditorInput = (e) => {
+    const newValue = e.currentTarget.textContent || '';
+    setText(newValue);
+    if (onChange) onChange({ target: { name, value: newValue } });
+  };
+
+  const insertFormat = (before, after = '', placeholder = '') => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    editor.focus();
+    const selection = document.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) {
+      range.selectNodeContents(editor);
+      range.collapse(false);
+    }
+
+    const selectedText = selection.toString() || placeholder;
+    const textNode = document.createTextNode(before + selectedText + after);
+    range.deleteContents();
+    range.insertNode(textNode);
+
+    const newRange = document.createRange();
+    newRange.setStartAfter(textNode);
+    newRange.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(newRange);
+
+    const newText = editor.textContent || '';
+    setText(newText);
+    if (onChange) onChange({ target: { name, value: newText } });
+  };
+
+  const formatButtons = [
+    { icon: Bold, action: () => insertFormat('**', '**', 'texto en negrita'), tooltip: 'Negrita (Ctrl+B)' },
+    { icon: Italic, action: () => insertFormat('*', '*', 'texto en cursiva'), tooltip: 'Cursiva (Ctrl+I)' },
+    { icon: Heading1, action: () => insertFormat('# ', '', 'Título principal'), tooltip: 'Título H1' },
+    { icon: Heading2, action: () => insertFormat('## ', '', 'Subtítulo'), tooltip: 'Título H2' },
+    { icon: List, action: () => insertFormat('- ', '', 'Elemento de lista'), tooltip: 'Lista' },
+    { icon: Link, action: () => insertFormat('[', '](url)', 'texto del enlace'), tooltip: 'Enlace' },
+    { icon: Image, action: () => insertFormat('![', '](url)', 'alt text'), tooltip: 'Imagen' },
+    { icon: Code, action: () => insertFormat('`', '`', 'código'), tooltip: 'Código inline' },
+  ];
+
+  const renderedHtml = useMemo(() => {
+    const raw = String(text || '');
+    if (!raw.trim()) return '<p class="text-slate-400 italic text-sm">La vista previa aparecerá aquí...</p>';
+
+    const escaped = raw
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    const withHeaders = escaped
+      .replace(/^######\s*(.+)$/gm, '<h6 class="text-sm font-bold text-slate-700 mt-4 mb-2">$1</h6>')
+      .replace(/^#####\s*(.+)$/gm, '<h5 class="text-base font-bold text-slate-700 mt-4 mb-2">$1</h5>')
+      .replace(/^####\s*(.+)$/gm, '<h4 class="text-lg font-bold text-slate-700 mt-4 mb-2">$1</h4>')
+      .replace(/^###\s*(.+)$/gm, '<h3 class="text-xl font-bold text-slate-700 mt-4 mb-2">$1</h3>')
+      .replace(/^##\s*(.+)$/gm, '<h2 class="text-2xl font-bold text-slate-700 mt-4 mb-2">$1</h2>')
+      .replace(/^#\s*(.+)$/gm, '<h1 class="text-3xl font-black text-slate-800 mt-6 mb-3">$1</h1>');
+
+    const withImages = withHeaders.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" class="max-w-full rounded-lg my-3 shadow-sm border border-slate-200" />');
+    const withLinks = withImages.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 underline font-medium">$1</a>');
+    const withBold = withLinks.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900">$1</strong>');
+    const withItalic = withBold.replace(/\*(.*?)\*/g, '<em class="italic text-slate-700">$1</em>');
+    const withCode = withItalic.replace(/`([^`]+)`/g, '<code class="bg-slate-100 text-slate-800 px-2 py-1 rounded text-sm font-mono">$1</code>');
+
+    const withListItems = withCode.replace(/^[-*]\s+(.+)$/gm, '<li class="ml-4 mb-1">$1</li>');
+    const withLists = withListItems.replace(/(<li>[\s\S]*?<\/li>)/gm, '<ul class="list-disc list-inside mb-3 text-slate-700">$1</ul>');
+
+    const withBlockquotes = withLists.replace(/^>\s*(.+)$/gm, '<blockquote class="border-l-4 border-blue-300 pl-4 py-2 my-3 bg-blue-50 text-slate-700 italic">$1</blockquote>');
+
+    const withParagraphs = withBlockquotes
+      .replace(/^(?!<h|<ul|<li|<img|<p|<blockquote|<code)(.+)$/gm, '<p class="mb-3 text-slate-700 leading-relaxed">$1</p>')
+      .replace(/<p><\/p>/g, '');
+
+    const withTables = withParagraphs.replace(/^(\|.*\|)\s*$/gm, (match) => {
+      const rows = match.trim().split('\n');
+      if (rows.length < 2) return match;
+
+      const headers = rows[0].split('|').slice(1, -1).map(h => h.trim());
+      const dataRows = rows.slice(2);
+
+      let tableHtml = '<div class="overflow-x-auto mb-4"><table class="min-w-full border border-slate-300 text-sm bg-white rounded-lg overflow-hidden"><thead class="bg-slate-100"><tr>';
+      headers.forEach(header => {
+        tableHtml += `<th class="border border-slate-300 px-3 py-2 text-left font-semibold text-slate-700">${header}</th>`;
+      });
+      tableHtml += '</tr></thead><tbody>';
+
+      dataRows.forEach(row => {
+        const cells = row.split('|').slice(1, -1).map(c => c.trim());
+        tableHtml += '<tr class="hover:bg-slate-50">';
+        cells.forEach(cell => {
+          tableHtml += `<td class="border border-slate-300 px-3 py-2 text-slate-600">${cell}</td>`;
+        });
+        tableHtml += '</tr>';
+      });
+
+      tableHtml += '</tbody></table></div>';
+      return tableHtml;
+    });
+
+    return withTables.replace(/\n/g, '');
+  }, [text]);
+
+  return (
+    <div className="w-full">
+      {/* Header with label and expand button */}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <label className="text-sm font-semibold text-slate-700">{label}</label>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowHelp(!showHelp)}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-md transition-colors"
+            title="Ayuda con Markdown"
+          >
+            <HelpCircle size={14} />
+            Ayuda
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPreview(!showPreview)}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 rounded-md transition-colors"
+            title={showPreview ? 'Ocultar vista previa' : 'Mostrar vista previa'}
+          >
+            {showPreview ? <EyeOff size={14} /> : <Eye size={14} />}
+            {showPreview ? 'Ocultar' : 'Mostrar'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+          >
+            {isExpanded ? 'Contraer' : 'Expandir Editor'}
+          </button>
+        </div>
+      </div>
+
+      {/* Editor Container */}
+      <div className={`relative bg-white border rounded-2xl overflow-hidden transition-all duration-500 ease-in-out ${isExpanded
+        ? 'shadow-2xl shadow-blue-500/10 border-blue-300'
+        : 'shadow-md border-slate-300'
+        }`}>
+        {/* Toolbar - Only visible when expanded */}
+        <div className={`flex items-center gap-1 p-3 bg-slate-50 border-b border-slate-200 transition-all duration-300 ${isExpanded ? 'opacity-100 max-h-16' : 'opacity-0 max-h-0 overflow-hidden'
+          }`}>
+          {formatButtons.map((btn, index) => {
+            const Icon = btn.icon;
+            return (
+              <button
+                key={index}
+                type="button"
+                onClick={btn.action}
+                className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-blue-100 hover:text-blue-600 transition-all duration-200 group"
+                title={btn.tooltip}
+              >
+                <Icon size={16} className="group-hover:scale-110 transition-transform" />
+              </button>
+            );
+          })}
+          <div className="ml-2 text-xs text-slate-500 border-l border-slate-300 pl-2">
+            Usa Ctrl+B para negrita, Ctrl+I para cursiva
+          </div>
+        </div>
+
+        {/* Editor and Preview */}
+        <div className="flex flex-col transition-all duration-500 ease-in-out gap-3">
+          {/* Preview - Only visible when expanded and showPreview is true */}
+          {showPreview && isExpanded && (
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 shadow-sm overflow-auto">
+              <div className="text-xs font-medium text-slate-600 mb-3 uppercase tracking-wide flex items-center gap-2">
+                <Eye size={14} />
+                Vista Previa
+              </div>
+              <div
+                className="prose prose-slate max-w-none prose-sm"
+                dangerouslySetInnerHTML={{ __html: renderedHtml || '<p class="text-slate-400 italic">La vista previa aparecerá aquí...</p>' }}
+              />
+            </div>
+          )}
+
+          {/* Editor de texto oculto visualmente, edición directa sobre la vista previa */}
+          <div className="relative p-4">
+            {!text && (
+              <div className="pointer-events-none absolute inset-0 px-4 py-4 text-slate-400">
+                Escribe aquí usando Markdown... Presiona Enter para nueva línea.
+              </div>
+            )}
+            <div
+              ref={editorRef}
+              contentEditable
+              suppressContentEditableWarning
+              role="textbox"
+              aria-multiline="true"
+              spellCheck="false"
+              onInput={handleEditorInput}
+              onKeyDown={handleKeyDown}
+              onFocus={() => setIsExpanded(true)}
+              className={`min-h-[128px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 text-gray-800 outline-none transition-all duration-300 focus:ring-2 focus:ring-blue-200 whitespace-pre-wrap break-words ${isExpanded ? 'min-h-[384px]' : 'min-h-[128px]'
+                }`}
+            >{text}</div>
+          </div>
+        </div>
+
+        {/* Expand indicator */}
+        {!isExpanded && text && (
+          <div className="absolute bottom-2 right-2 text-xs text-slate-400 bg-white/90 px-2 py-1 rounded-md shadow-sm border">
+            Contenido escrito - Expande para editar
+          </div>
+        )}
+
+        {/* Character count */}
+        {isExpanded && (
+          <div className="absolute bottom-2 left-4 text-xs text-slate-500">
+            {text.length} caracteres
+          </div>
+        )}
+      </div>
+
+      {/* Panel de Ayuda */}
+      {showHelp && (
+        <div className="mt-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <h4 className="text-sm font-semibold text-amber-800 mb-3 flex items-center gap-2">
+            <HelpCircle size={16} />
+            Guía de Markdown
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <h5 className="font-medium text-amber-700 mb-2">Formato Básico</h5>
+              <ul className="space-y-1 text-amber-600">
+                <li><code>**texto**</code> o <code>__texto__</code> → <strong>negrita</strong></li>
+                <li><code>*texto*</code> o <code>_texto_</code> → <em>cursiva</em></li>
+                <li><code>~~texto~~</code> → <del>tachado</del></li>
+              </ul>
+            </div>
+            <div>
+              <h5 className="font-medium text-amber-700 mb-2">Encabezados</h5>
+              <ul className="space-y-1 text-amber-600">
+                <li><code># Título</code> → Título grande</li>
+                <li><code>## Subtítulo</code> → Subtítulo mediano</li>
+                <li><code>### Sub-subtítulo</code> → Subtítulo pequeño</li>
+              </ul>
+            </div>
+            <div>
+              <h5 className="font-medium text-amber-700 mb-2">Listas</h5>
+              <ul className="space-y-1 text-amber-600">
+                <li><code>- item</code> → Lista con viñetas</li>
+                <li><code>1. item</code> → Lista numerada</li>
+                <li><code>   - subitem</code> → Sub-elemento</li>
+              </ul>
+            </div>
+            <div>
+              <h5 className="font-medium text-amber-700 mb-2">Otros</h5>
+              <ul className="space-y-1 text-amber-600">
+                <li><code>`código`</code> → <code>código inline</code></li>
+                <li><code>[texto](url)</code> → enlace</li>
+                <li><code>&gt; cita</code> → bloque de cita</li>
+              </ul>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-amber-200">
+            <p className="text-xs text-amber-600">
+              <strong>Atajos de teclado:</strong> Ctrl+B (negrita), Ctrl+I (cursiva)
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Select = ({
   label,
@@ -211,7 +518,8 @@ const Select = ({
   defaultValue,
   value,
   onChange,
-  searchable = true
+  searchable = true,
+  className = ""
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -229,6 +537,48 @@ const Select = ({
   const containerRef = useRef(null);
   const listRef = useRef(null);
 
+  // Dropdown auto-positioning: decide whether to open above or below trigger
+  const [openDirection, setOpenDirection] = useState('bottom'); // 'bottom' or 'top'
+  const [maxDropdownHeight, setMaxDropdownHeight] = useState(240);
+
+  const decidePosition = useCallback(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const desired = 240; // default desired dropdown height
+
+    if (spaceBelow < desired && spaceAbove > spaceBelow) {
+      setOpenDirection('top');
+      setMaxDropdownHeight(Math.max(80, Math.min(desired, spaceAbove - 12)));
+    } else {
+      setOpenDirection('bottom');
+      setMaxDropdownHeight(Math.max(80, Math.min(desired, spaceBelow - 12)));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onResize = () => decidePosition();
+    const onScroll = () => decidePosition();
+    window.addEventListener('resize', onResize);
+    // capture scroll events from ancestors as well
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [isOpen, decidePosition]);
+
+  const handleToggle = () => {
+    if (isOpen) {
+      setIsOpen(false);
+    } else {
+      decidePosition();
+      setIsOpen(true);
+    }
+  };
+
   const filteredOptions = useMemo(() => {
     if (!searchTerm) return options;
     return options.filter(opt =>
@@ -239,7 +589,11 @@ const Select = ({
   // Manejo de teclado
   const handleKeyDown = (e) => {
     if (!isOpen) {
-      if (e.key === 'ArrowDown' || e.key === 'Enter') setIsOpen(true);
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        decidePosition();
+        setIsOpen(true);
+        setFocusedIndex(0);
+      }
       return;
     }
 
@@ -316,11 +670,11 @@ const Select = ({
     >
       {/* Gatillo del Select */}
       <div
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         tabIndex="0" // Hacer que el div sea enfocable
-        className={`h-12 min-w-80 bg-white text-gray-800 px-4 w-full border rounded-xl outline-none transition-all duration-300 flex items-center cursor-pointer
+        className={`h-12 min-w-40 bg-white text-gray-800 px-4 w-full border rounded-xl outline-none transition-all duration-300 flex items-center cursor-pointer
           ${isOpen || hasContent ? 'border-blue-500 ring-1 ring-blue-500/20' : 'border-slate-300'}
-          focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20`}
+          focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 ${className}`}
       >
         <span className={`text-base ${!selectedOption ? 'opacity-0' : 'opacity-100'}`}>
           {selectedOption?.label}
@@ -342,9 +696,7 @@ const Select = ({
       </div>
 
       {/* Menú Desplegable */}
-      <div className={`absolute  left-0 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden transition-all duration-300 origin-top
-        ${isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 pointer-events-none -translate-y-2'}`}
-      >
+      <div className={`absolute left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden transition-all duration-300 ${openDirection === 'bottom' ? 'mt-2 origin-top' : 'mb-2 bottom-full origin-bottom'} ${isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 pointer-events-none -translate-y-2'}`}>
         {searchable && (
           <div className="p-2 border-b border-slate-100 bg-slate-50/50">
             <input
@@ -362,11 +714,11 @@ const Select = ({
           </div>
         )}
 
-        <ul ref={listRef} className="max-h-[240px]  custom-scrollbar overflow-y-auto py-1">
+        <ul ref={listRef} className="custom-scrollbar overflow-y-auto py-1" style={{ maxHeight: `${maxDropdownHeight}px` }}>
           {filteredOptions.length > 0 ? (
             filteredOptions.map((option, index) => (
               <li
-                key={option.value}
+                key={option.value != null ? String(option.value) : `opt-${index}`}
                 onClick={() => handleSelect(option)}
                 onMouseEnter={() => setFocusedIndex(index)} // Sincronizar mouse con teclado
                 className={`px-4 py-3 text-sm transition-all duration-150 cursor-pointer
@@ -377,7 +729,7 @@ const Select = ({
               </li>
             ))
           ) : (
-            <li className="px-4 py-3 text-sm text-gray-400 text-center italic">No hay resultados</li>
+            <li key="no-results" className="px-4 py-3 text-sm text-gray-400 text-center italic">No hay resultados</li>
           )}
         </ul>
       </div>
@@ -387,4 +739,4 @@ const Select = ({
   );
 };
 
-export { Input, TextArea, InputNumber, Select };
+export { Input, TextArea, InputNumber, MarkdownEditor, Select };

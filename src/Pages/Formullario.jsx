@@ -8,9 +8,7 @@ import { Input, TextArea } from "../Componets/Inputs";
 
 const Formulario = () => {
     return (<>
-            <Nav />
-            <Bg />
-            <Sidebar />
+
 
 
 

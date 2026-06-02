@@ -1,333 +1,718 @@
+/**
+ * FORMATO OFICIAL: SOLICITUD DE COMPRA Y SUMINISTROS (SCS)
+ * Diseñado para CVG Cabelum - División de Logística
+ */
+
+import pool from '../DataBase/Mysql/ConexionSQL.js';
+import { PDFDocument as PDFLibDocument, rgb, StandardFonts } from 'pdf-lib';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import PDFDocument from 'pdfkit';
 
-import { solicitudESCOMPRA } from '../DataBase/ConsultasSQL.js';
-import pool from '../DataBase/ConexionSQL.js';
-
-
-const azulPrimario = '#155dfc';
-const tituloColor = '#2c3e50'
-export const generarPDF = async (req, res) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename=reporte-final.pdf');
-    doc.pipe(res);
-
-    const azulClaro = '#3498db';
-    const grisFondo = '#f2f2f2';
-    const datosSolicitudes = await solicitudESCOMPRA({ limit: 1000 });
-    const datos = datosSolicitudes.rows;
-    const datosgrafico = await pool.query(`
-SELECT 
-    g.nombre_gerencia AS etiqueta,
-    SUM(s.monto_estimado) AS monto_real,
-    ROUND(
-        (SUM(s.monto_estimado) * 100 / (SELECT SUM(monto_estimado) FROM solicitudes_compra WHERE estado = 'Aprobado')), 
-        1
-    ) AS valor
-FROM gerencias g
-INNER JOIN solicitudes_compra s ON g.id_gerencia = s.id_gerencia
-WHERE s.estado = 'Aprobado'
-GROUP BY g.id_gerencia;`)
-    console.log(datos.length);
-    console.log(datosgrafico[0]);
-
-    // --- ENCABEZADO ---
-    doc.rect(0, 0, 612, 100).fill(azulPrimario);
-    doc.fillColor('white').fontSize(25).text('REPORTE DE SOLICITUDES', 50, 40);
-    doc.fontSize(8).text('CVG CABELUM - SISTEMA DE GESTIÓN DE SOLICITUDES DE COMPRA Y VENTA', 50, 70);
-
-    // --- VARIABLE DE CONTROL DE POSICIÓN ---
-    let yActual = 130;
-
-    // Título de Sección
-    doc.fillColor(tituloColor).fontSize(16).text('Resumen de Solicitudes', 50, yActual);
-    doc.moveTo(50, yActual + 20).lineTo(550, yActual + 20).lineWidth(1).stroke(azulPrimario);
-
-    yActual += 40; // Bajamos el cursor después del título
-
-    // --- TABLA ---
-    doc.fillColor(tituloColor).fontSize(12).font('Helvetica-Bold');
-    doc.text('ID', 50, yActual);
-    doc.text('Gerencia', 150, yActual);
-    doc.text('Resumen', 300, yActual);
-    doc.text('Monto Estimado', 400, yActual, { align: 'right' });
-
-    yActual += 20;
-    doc.moveTo(50, yActual).lineTo(550, yActual).lineWidth(1).stroke(azulPrimario);
-    yActual += 10;
-
-
-
-    datos.forEach((item, index) => {
-        if (index % 2 === 0) doc.rect(50, yActual - 5, 500, 20).fill(grisFondo);
-        doc.fillColor('#333333').font('Helvetica').fontSize(10);
-        doc.text(item.id_solicitud, 50, yActual);
-        doc.text(item.nombre_gerencia, 150, yActual);
-        doc.text(item.resumen, 300, yActual);
-        doc.text(item.monto_estimado + ' $', 400, yActual, { align: 'right' });
-        yActual += 20;
-    });
-
-    doc.addPage();
-
-
-    doc.rect(0, 0, 612, 100).fill(azulPrimario);
-    doc.fillColor('white').fontSize(25).text('REPORTE DE SOLICITUDES', 50, 40);
-    doc.fontSize(8).text('CVG CABELUM - SISTEMA DE GESTIÓN DE SOLICITUDES DE COMPRA Y VENTA', 50, 70);
-
-    // Reiniciar la coordenada Y al margen superior de la nueva hoja
-    yActual = 130; // Espacio extra antes de las barras
-
-
-    // doc.fillColor('#2c3e50')
-    //     .font('Helvetica-Bold')
-    //     .fontSize(14)
-    //     .text('Rendimiento de Solicitudes', 50, yActual, { characterSpacing: 1 });
-
-    // doc.moveTo(50, yActual + 20).lineTo(550, yActual + 20).lineWidth(1).strokeColor(azulPrimario).stroke();
-
-    yActual += 40;
-
-
-
-    // // dibujarBarra(doc, 'Backend', 85, 50, yActual);
-    // // yActual += 25;
-    // // dibujarBarra(doc, 'Frontend', 60, 50, yActual);
-    // // yActual += 25;
-    // // dibujarBarra(doc, 'Base de Datos', 95, 50, yActual);
-
-    // yActual += 80; // <--- ESTE ESPACIO evita que el pastel choque con las barras
-
-    // --- SECCIÓN: ESTADO (Pastel) ---
-    const datosGrafico = datosgrafico[0];
-    doc.y += 50;
-
-
-    // Llamamos a la versión Pro que tiene título interno
-    dibujarGraficoPastel(doc, 'Porcentaje gastado por gerencia', datosGrafico, 50, yActual, 80);
-    yActual += 200;
-
-    // --- TABLA ---
-    doc.fillColor(tituloColor).fontSize(12).font('Helvetica-Bold');
-    doc.text('ID', 50, yActual);
-    doc.text('Gerencia', 150, yActual);
-    doc.text('Monto', 300, yActual);
-    doc.text('Porcentaje', 400, yActual, { align: 'right' });
-
-    yActual += 20;
-    doc.moveTo(50, yActual).lineTo(550, yActual).lineWidth(1).stroke(azulPrimario);
-    yActual += 10;
-
-    datosGrafico.forEach((item, index) => {
-        if (index % 2 === 0) doc.rect(50, yActual - 5, 500, 20).fill(grisFondo);
-
-        doc.fillColor('#333333').font('Helvetica').fontSize(10);
-        doc.text(index + 1, 50, yActual);
-        doc.text(item.etiqueta, 150, yActual);
-        doc.text(item.monto_real + ' $', 300, yActual);
-        doc.text(item.valor + ' %', 400, yActual, { align: 'right' });
-        yActual += 20;
-    });
-    // --- PIE DE PÁGINA ---
-    const totalPages = doc.bufferedPageRange().count;
-    for (let i = 0; i < totalPages; i++) {
-        doc.switchToPage(i);
-        doc.fillColor('grey').fontSize(8).text(`Página ${i + 1} de ${totalPages}`, 50, doc.page.height - 50, { align: 'center' });
-    }
-
-    doc.end();
+// Configuración de Estilo Corporativo
+const PALETTE = {
+   primary: '#1a237e',    // Azul Cabelum
+   secondary: '#4169E1',  // Royal Blue
+   accent: '#f8faff',     // Fondo suave
+   text: '#1e293b',       // Gris oscuro para lectura
+   muted: '#64748b',      // Gris para etiquetas
+   border: '#e2e8f0',     // Bordes finos
+   white: '#ffffff',
+   bg: '#1447e6'
 };
 
 
-// Función para dibujar una barra con etiqueta
-const dibujarBarra = (doc, etiqueta, valor, x, y) => {
-    const anchoMaximo = 200;
-    const altoBarra = 15;
-    const porcentaje = valor / 100;
 
-    // Etiqueta
-    doc.fillColor('#2c3e50').fontSize(10).text(etiqueta, x, y);
 
-    // Fondo de la barra (gris)
-    doc.rect(x + 80, y - 2, anchoMaximo, altoBarra).fill('#ecf0f1');
+// =========================================================================
+// 1. CONTROLADOR PRINCIPAL DE EXPRESS (PDFKit)
+// =========================================================================
+export const generarPDF = async (req, res, id) => {
+   try {
+      // Obtención de datos de la solicitud con JOINs precisos
+      const [rows] = await pool.query(
+         `SELECT s.*, 
+                 s.justificacion_pdf_url, 
+                 s.requerimientos_pdf_url, 
+                 s.requerimientos_texto, 
+                 s.justificacion, 
+                 s.tipo_solicitud, 
+                 u.nombres, 
+                 u.apellidos, 
+                 u.cedula,
+                 g.nombre_gerencia AS departamento, 
+                 e.nombre AS estado_actual,
+                 IF(s.justificacion_pdf_url IS NOT NULL AND s.justificacion_pdf_url != '', 1, 0) AS tiene_justificacion_pdf,
+                 IF(s.requerimientos_pdf_url IS NOT NULL AND s.requerimientos_pdf_url != '', 1, 0) AS tiene_requerimientos_pdf
+          FROM solicitudes_compra s
+          JOIN usuarios u ON s.id_solicitante = u.id_usuario
+          JOIN gerencias g ON s.id_gerencia = g.id_gerencia
+          JOIN estados_solicitud e ON s.id_estado = e.id_estado
+          WHERE s.id_solicitud = ?`, [id]
+      );
 
-    // Barra de datos (azul)
-    doc.rect(x + 80, y - 2, anchoMaximo * porcentaje, altoBarra).fill('#3498db');
+      if (!rows.length) return res.status(404).send('Solicitud no encontrada');
+      const sol = rows[0];
 
-    // Valor en texto
-    doc.fillColor('#2c3e50').text(`${valor}%`, x + 80 + anchoMaximo + 10, y);
+      // Obtención de los ítems asociados a la solicitud
+      const [items] = await pool.query(
+         `SELECT ds.*, 
+                 COALESCE(p.nombre_producto, s.nombre_servicio) as descripcion,
+                 COALESCE(p.codigo_producto, s.codigo_servicio) as nro_parte,
+                 um.abreviatura as unidad
+          FROM detalles_solicitud ds
+          LEFT JOIN productos_almacen p ON ds.id_producto = p.id_producto
+          LEFT JOIN servicios s ON ds.id_servicio = s.id_servicio
+          LEFT JOIN unidades_medida um ON p.id_unidad = um.id_unidad
+          WHERE ds.id_solicitud = ?`, [id]
+      );
+
+      // Configuración de la instancia de PDFKit
+      const doc = new PDFDocument({ 
+         size: 'A4', 
+         margins: { top: 40, bottom: 40, left: 40, right: 40 },
+         bufferPages: true 
+      });
+      
+      const fragments = [];
+      doc.on('data', (chunk) => fragments.push(chunk));
+
+      let currentY = 20;
+
+      // --- COMPONENTES VISUALES INTERNOS ---
+      const dibujarCabeceraLogos = (yCoord) => {
+         doc.image('public/desarrollo.png', 40, yCoord, { height: 40, width: 290 });
+         doc.image('public/cvg.png', 450, yCoord - 9, { width: 50, height: 50 });
+         doc.moveTo(509, yCoord).lineTo(509, yCoord + 35).lineWidth(0.5).strokeColor(PALETTE.primary).stroke();
+         doc.image('public/CVG2.png', 510, yCoord - 6, { height: 50, width: 50 });
+      };
+
+      const dibujarTitulosFormulario = (yCoord) => {
+         doc.fillColor(PALETTE.text).font('Helvetica-Bold').fontSize(14).text('SOLICITUD DE COMPRA Y SUMINISTROS', 165, yCoord + 16);
+         doc.fontSize(8).fillColor(PALETTE.muted).font('Helvetica').text('CÓDIGO: FOR-LOG-001 | REVISIÓN: 04', 40, yCoord + 55);
+      };
+
+      const dibujarSubHeaderTabla = (yCoord) => {
+         doc.rect(40, yCoord, 515, 20).fill(PALETTE.primary);
+         const headers = ['#', 'DESCRIPCIÓN TÉCNICA', 'NRO. PARTE', 'CANT.', 'UNIDAD'];
+         let startX = 45;
+         headers.forEach((h, i) => {
+            doc.fillColor(PALETTE.white).fontSize(8).font('Helvetica-Bold').text(h, startX, yCoord + 6);
+            startX += i === 0 ? 30 : i === 1 ? 280 : i === 2 ? 80 : 60;
+         });
+      };
+
+      // --- CONSTRUCCIÓN MAQUETA BASE ---
+      dibujarCabeceraLogos(currentY);
+      currentY += 60;
+      dibujarTitulosFormulario(currentY);
+      currentY += 55;
+      
+      // Indicador de control numérico correlativo
+      doc.roundedRect(420, currentY, 135, 45, 8).fill(PALETTE.accent);
+      doc.fillColor(PALETTE.primary).fontSize(7).font('Helvetica-Bold').text('NRO. CONTROL', 430, currentY + 10);
+      doc.fontSize(14).text(`SCS-${String(id).padStart(5, '0')}`, 430, currentY + 22);
+      doc.fontSize(8).fillColor(PALETTE.muted).font('Helvetica').text('Tipo de solicitud:', 40, currentY + 15);
+      doc.fontSize(9).fillColor(PALETTE.primary).font('Helvetica-Bold').text(sol.tipo_solicitud, 101, currentY + 15);
+      currentY += 60;
+
+      // Bloque de identificación de metadata
+      const drawField = (label, value, x, y, width) => {
+         doc.fillColor(PALETTE.muted).fontSize(7).font('Helvetica-Bold').text(label, x, y);
+         doc.fillColor(PALETTE.text).fontSize(9).font('Helvetica').text(value || 'N/A', x, y + 12, { width: width });
+      };
+      doc.rect(40, currentY, 515, 60).strokeColor(PALETTE.border).stroke();
+      drawField('DEPARTAMENTO SOLICITANTE', sol.departamento.toUpperCase(), 55, currentY + 10, 200);
+      drawField('FECHA DE EMISIÓN', new Date(sol.fecha_creacion).toLocaleDateString('es-VE'), 300, currentY + 10, 100);
+      drawField('PRIORIDAD', (sol.prioridad || 'NORMAL').toUpperCase(), 450, currentY + 10, 80);
+      drawField('SOLICITANTE', `${sol.nombres} ${sol.apellidos} (V-${sol.cedula})`, 55, currentY + 35, 250);
+      drawField('ESTADO ACTUAL', sol.estado_actual.toUpperCase(), 300, currentY + 35, 200);
+      currentY += 80;
+
+      // Sección de justificación estructurada
+      doc.fillColor(PALETTE.primary).fontSize(10).font('Helvetica-Bold').text('JUSTIFICACIÓN Y ALCANCE', 40, currentY);
+      doc.rect(40, currentY + 15, 515, 50).fill(PALETTE.accent);
+      doc.fillColor(PALETTE.text).fontSize(8).font('Helvetica').text(sol.justificacion || 'Sin justificación detallada.', 50, currentY + 23, { width: 495, align: 'justify' });
+      currentY += 85;
+
+      // Renderizado del subencabezado de la tabla
+      dibujarSubHeaderTabla(currentY);
+      currentY += 20;
+
+      // Ciclo dinámico de ítems cargados
+      items.forEach((item, index) => {
+         if (currentY > 680) {
+            doc.addPage(); 
+            currentY = 20;
+            dibujarCabeceraLogos(currentY);
+            currentY += 60;
+            dibujarTitulosFormulario(currentY);
+            currentY += 75;
+            dibujarSubHeaderTabla(currentY);
+            currentY += 20;
+         }
+         const isEven = index % 2 === 0;
+         if (isEven) doc.rect(40, currentY, 515, 20).fill('#f1f5f9');
+
+         doc.fillColor(PALETTE.text).fontSize(8).font('Helvetica');
+         doc.text(index + 1, 45, currentY + 6);
+         doc.text(item.descripcion, 75, currentY + 6, { width: 270, height: 10, ellipsis: true });
+         doc.text(item.nro_parte || 'S/C', 355, currentY + 6);
+         doc.text(item.cantidad, 435, currentY + 6);
+         doc.text(item.unidad || 'UND', 495, currentY + 6);
+         currentY += 20; 
+      });
+
+      // Cuadro inferior reglamentario de firmas
+      if (currentY > 640) {
+         doc.addPage(); currentY = 20; dibujarCabeceraLogos(currentY); dibujarTitulosFormulario(currentY); currentY += 90;
+      } else {
+         currentY = Math.max(currentY + 30, 580);
+      }
+      const SIGNATURE_BOX_HEIGHT = 80;
+      doc.rect(40, currentY, 515, SIGNATURE_BOX_HEIGHT).strokeColor(PALETTE.border).stroke();
+
+      const drawSignature = (title, x) => {
+         doc.moveTo(x, currentY + 50).lineTo(x + 140, currentY + 50).strokeColor(PALETTE.muted).stroke();
+         doc.fillColor(PALETTE.primary).fontSize(7).font('Helvetica-Bold').text(title, x, currentY + 55, { width: 140, align: 'center' });
+         doc.fillColor(PALETTE.muted).fontSize(6).font('Helvetica').text('FIRMA Y SELLO', x, currentY + 65, { width: 140, align: 'center' });
+      };
+      drawSignature('SOLICITANTE', 60);
+      drawSignature('GERENTE DE ÁREA', 227);
+      drawSignature('RECEPCIÓN PROCURA', 395);
+
+      // Estampado de cintillo inferior institucional
+      const totalPages = doc.bufferedPageRange().count;
+      for (let i = 0; i < totalPages; i++) {
+         doc.switchToPage(i);
+         doc.image('public/footer.png', 0, 705, { width: 595.28, height: 140 });
+      }
+
+   // Interceptor del fin del flujo de PDFKit
+doc.on('end', async () => {
+   try {
+      // 1. Inicializamos el buffer dinámico con el resultado maestro de PDFKit
+      let pdfBufferActual = Buffer.concat(fragments);
+
+      // ====================================================================
+      // FASE B: PROCESAR BLOQUE DE JUSTIFICACIÓN Y ALCANCE
+      // ====================================================================
+      const rutaPdfJustificacion = `Backend/uploads/solicitudes/${sol.justificacion_pdf_url}`;
+
+      if (sol.tiene_justificacion_pdf === 1 && fs.existsSync(rutaPdfJustificacion)) {
+         console.log('Acoplando archivo PDF físico de Justificación...');
+         // Trabajamos sobre el "pdfBufferActual" que YA contiene los requerimientos de la Fase A
+         pdfBufferActual = await adjuntarAnexosConEstilo(pdfBufferActual, rutaPdfJustificacion, 'Justificación y Alcance');
+      } else {
+         console.log('No se detectó PDF de justificación. Generando desde campo de texto...');
+         const textoJustificacion = sol.justificacion || 'No se registró justificación detallada en texto.';
+         
+         // Agrega otra hoja nueva al final con el texto de la justificación
+         pdfBufferActual = await generarHojaTextoAlternativo(pdfBufferActual, textoJustificacion, 'Justificación y Alcance');
+      }
+
+      
+      // ====================================================================
+      // FASE A: PROCESAR BLOQUE DE REQUERIMIENTOS TÉCNICOS
+      // ====================================================================
+      const rutaPdfRequerimientos = `Backend/uploads/solicitudes/${sol.requerimientos_pdf_url}`;
+
+      if (sol.tiene_requerimientos_pdf === 1 && fs.existsSync(rutaPdfRequerimientos)) {
+         console.log('Acoplando archivo PDF físico de Requerimientos...');
+         // Modifica la hoja original inyectándole las páginas vectoriales del PDF
+         pdfBufferActual = await adjuntarAnexosConEstilo(pdfBufferActual, rutaPdfRequerimientos, 'Especificaciones Técnicas');
+      } else {
+         console.log('No se detectó PDF de requerimientos. Generando desde campo de texto...');
+         const textoRequerimientos = sol.requerimientos_texto || 'No se registraron especificaciones técnicas en texto.';
+         
+         // Agrega una hoja nueva con el texto formateado y centrado
+         pdfBufferActual = await generarHojaTextoAlternativo(pdfBufferActual, textoRequerimientos, 'Requerimientos Técnicos');
+      }
+
+      // ====================================================================
+      // FASE C: DESPACHO ÚNICO AL NAVEGADOR DEL CLIENTE
+      // ====================================================================
+      console.log('Enviando documento SCS final con todos los anexos procesados...');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename=SCS-${id}.pdf`);
+      
+      // Enviamos el buffer final que pasó exitosamente por ambas fases
+      return res.send(Buffer.from(pdfBufferActual));
+
+   } catch (err) {
+      console.error('Error crítico procesando la fase final del PDF:', err);
+      if (!res.headersSent) {
+         res.status(500).json({ error: 'Fallo al acoplar anexos y textos en el flujo SCS' });
+      }
+   }
+});
+
+      // Cerramos de forma definitiva el documento maestro
+      doc.end();
+
+   } catch (error) {
+      console.error('Error crítico general:', error);
+      if (!res.headersSent) {
+         res.status(500).json({ error: 'Fallo al procesar documento SCS base' });
+      }
+   }
 };
-const dibujarGraficoPastel = (doc, titulo, datos, x, y, radio) => {
-    // --- Configuración de Colores ---
-    const colores = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796'];
-    const grisSuave = '#f8f9fc';
-    const bordeColor = '#eaecf4';
 
-    // Dimensiones de la "Tarjeta"
-    const anchoCard = 500;
-    const altoCard = (radio * 2) + 80;
+const generarHojaTextoAlternativo = async (baseBuffer, textoAlternativo, titulo) => {
+   // 1. Cargamos el PDF maestro construido por PDFKit
+   const pdfDestino = await PDFLibDocument.load(baseBuffer);
+   
+   // 2. Creamos una hoja limpia A4 (595.28 x 841.89) para las especificaciones en texto
+   const nuevaHoja = pdfDestino.addPage([595.28, 841.89]);
+   const anchoHoja = 595.28;
 
-    doc.y += 50;
+   // 3. Carga binaria e inserción de recursos gráficos corporativos
+   const logoDesarrolloBytes = fs.readFileSync('public/desarrollo.png');
+   const logoCvgBytes = fs.readFileSync('public/cvg.png');
+   const logoCvg2Bytes = fs.readFileSync('public/CVG2.png');
+   const bannerFooterBytes = fs.readFileSync('public/footer.png');
 
-    // 2. Título Estilizado
-    doc.fillColor('#2c3e50')
-        .font('Helvetica-Bold')
-        .fontSize(14)
-        .text(titulo.toUpperCase(), x, y - 38, { characterSpacing: 1 });
+   const imgDesarrollo = await pdfDestino.embedPng(logoDesarrolloBytes);
+   const imgCvg = await pdfDestino.embedPng(logoCvgBytes);
+   const imgCvg2 = await pdfDestino.embedPng(logoCvg2Bytes);
+   const imgFooter = await pdfDestino.embedPng(bannerFooterBytes);
+   
+   const fuenteHelvetica = await pdfDestino.embedFont(StandardFonts.Helvetica);
+   const fuenteHelveticaBold = await pdfDestino.embedFont(StandardFonts.HelveticaBold);
 
-    // Línea divisoria bajo el título
-    doc.moveTo(x, y - 20).lineTo(x + anchoCard, y - 20).lineWidth(1).strokeColor(azulPrimario).stroke();
+   // ====================================================================
+   // ENMARCADO E IDENTIDAD CORPORATIVA SUPERIOR (Cabecera limpia)
+   // ====================================================================
+   nuevaHoja.drawImage(imgDesarrollo, { x: 40, y: 782, height: 40, width: 290 });
+   nuevaHoja.drawImage(imgCvg, { x: 450, y: 773, width: 50, height: 50 });
+   nuevaHoja.drawImage(imgCvg2, { x: 510, y: 776, height: 50, width: 50 });
+   
+   nuevaHoja.drawLine({
+      start: { x: 509, y: 822 },
+      end: { x: 509, y: 787 },
+      thickness: 0.5,
+      color: rgb(0.11, 0.22, 0.42)
+   });
 
-    // 3. Dibujar Donut (con sombra sutil)
-    const centroX = x + radio;
-    const centroY = y + radio + 10;
-    const radioInterior = radio * 0.65; // Agujero un poco más grande
-    let anguloInicial = -Math.PI / 2;
+   // ====================================================================
+   // CÁLCULO DE CENTRADO DINÁMICO PARA EL TÍTULO
+   // ====================================================================
+   const tamanoTitulo = 14;
+   // Medimos de forma estricta cuánto espacio ocupa el texto enviado por parámetro
+   const anchoTextoTitulo = fuenteHelveticaBold.widthOfTextAtSize(titulo, tamanoTitulo);
+   // Fórmula de alineación central equilibrada
+   const tituloX = (anchoHoja - anchoTextoTitulo) / 2;
 
-    datos.forEach((segmento, index) => {
-        const anguloSegmento = (segmento.valor / 100) * (2 * Math.PI);
-        const anguloFinal = anguloInicial + anguloSegmento;
-        const color = colores[index % colores.length];
+   // Título en NEGRITA centrado dinámicamente
+   nuevaHoja.drawText(titulo, {
+      x: tituloX, // <-- Usamos la variable calculada
+      y: 750, 
+      size: tamanoTitulo, 
+      font: fuenteHelveticaBold, 
+      color: rgb(0.1, 0.1, 0.1)
+   });
 
-        const largeArcFlag = anguloSegmento > Math.PI ? 1 : 0;
+   nuevaHoja.drawText('CÓDIGO: FOR-LOG-001 | REVISIÓN: 04', {
+      x: 40, y: 720, size: 8, font: fuenteHelvetica, color: rgb(0.4, 0.4, 0.4)
+   });
 
-        // Coordenadas
-        const sX = centroX + radio * Math.cos(anguloInicial);
-        const sY = centroY + radio * Math.sin(anguloInicial);
-        const eX = centroX + radio * Math.cos(anguloFinal);
-        const eY = centroY + radio * Math.sin(anguloFinal);
-        const sXi = centroX + radioInterior * Math.cos(anguloFinal);
-        const sYi = centroY + radioInterior * Math.sin(anguloFinal);
-        const eXi = centroX + radioInterior * Math.cos(anguloInicial);
-        const eYi = centroY + radioInterior * Math.sin(anguloInicial);
+   // ====================================================================
+   // RENDERIZADO DEL TEXTO CON AJUSTE DE LÍNEA AUTOMÁTICO (Word Wrap)
+   // ====================================================================
+   const textoAProcesar = textoAlternativo || 'No se adjuntaron especificaciones técnicas en texto para esta solicitud.';
+   
+   // Definimos márgenes internos de lectura para el texto (Margen izquierdo de 40)
+   let inicioX = 40;
+   let inicioY = 670; // Empezamos debajo de la línea de revisión
+   const interlineado = 14;
+   const tamanoFuente = 10;
+   const anchoMaximoTexto = 515; // 595 - 40 (izq) - 40 (der)
 
-        const pathData = `M ${sX} ${sY} A ${radio} ${radio} 0 ${largeArcFlag} 1 ${eX} ${eY} L ${sXi} ${sYi} A ${radioInterior} ${radioInterior} 0 ${largeArcFlag} 0 ${eXi} ${eYi} Z`;
+   // Función auxiliar para cortar el texto en renglones sin romper palabras
+   const dividirTextoEnLineas = (text, font, size, maxWidth) => {
+      const palabras = text.split(' ');
+      const lineas = [];
+      let lineaActual = '';
 
-        doc.path(pathData).fill(color).lineWidth(1.5).stroke('white');
-        anguloInicial = anguloFinal;
-    });
+      palabras.forEach((palabra) => {
+         const testLinea = lineaActual + (lineaActual ? ' ' : '') + palabra;
+         const anchoTest = font.widthOfTextAtSize(testLinea, size);
+         
+         if (anchoTest > maxWidth) {
+            lineas.push(lineaActual);
+            lineaActual = palabra;
+         } else {
+            lineaActual = testLinea;
+         }
+      });
+      if (lineaActual) lineas.push(lineaActual);
+      return lineas;
+   };
 
-    // 4. Texto Central (KPI)
-    doc.fillColor('#5a5c69').fontSize(12).font('Helvetica-Bold')
-        .text(`TOTAL`, centroX - 25, centroY - 15, { width: 50, align: 'center' });
-    doc.fontSize(10).font('Helvetica').text('100%', centroX - 25, centroY + 5, { width: 50, align: 'center' });
+   // Ejecutamos la división de párrafos y textos
+   const lineasFinales = dividirTextoEnLineas(textoAProcesar, fuenteHelvetica, tamanoFuente, anchoMaximoTexto);
 
-    // 5. Leyenda en Dos Columnas (Alineada)
-    const inicioLeyendaX = x + (radio * 2) + 40;
-    const itemsPorColumna = Math.ceil(datos.length / 2);
+   // Dibujamos cada línea calculando que no pise el área del footer (Y: 140)
+   lineasFinales.forEach((linea) => {
+      if (inicioY > 150) { // Límite de seguridad antes del footer
+         nuevaHoja.drawText(linea, {
+            x: inicioX,
+            y: inicioY,
+            size: tamanoFuente,
+            font: fuenteHelvetica,
+            color: rgb(0.15, 0.15, 0.15)
+         });
+         inicioY -= interlineado;
+      }
+   });
 
-    datos.forEach((segmento, index) => {
-        const col = index < itemsPorColumna ? 0 : 1;
-        const fila = index < itemsPorColumna ? index : index - itemsPorColumna;
+   // ====================================================================
+   // ENMARCADO E IDENTIDAD CORPORATIVA INFERIOR (Footer de barras alto 140)
+   // ====================================================================
+   nuevaHoja.drawImage(imgFooter, { x: 0, y: 0, width: anchoHoja, height: 140 });
 
-        const itemX = inicioLeyendaX + (col * 140);
-        const itemY = (y + 20) + (fila * 25);
-        const color = colores[index % colores.length];
+   // Guardamos y devolvemos la matriz final de bytes modificada
+   return await pdfDestino.save();
+};
 
-        // Bullet con borde
-        doc.circle(itemX, itemY + 3, 5).fill(color).lineWidth(1).strokeColor('#fff').stroke();
+// =========================================================================
+// 2. NUEVA SUBFUNCIÓN DE PROCESAMIENTO Y ENLACE DE ADJUNTOS (PDF-LIB)
+// =========================================================================
+const adjuntarAnexosConEstilo = async (baseBuffer, rutaAdjunto, heading = 'Documento Adjunto') => {
+   try {
+      const pdfDestino = await PDFLibDocument.load(baseBuffer);
 
-        // Texto
-        doc.fillColor('#5a5c69').font('Helvetica').fontSize(9)
-            .text(segmento.etiqueta, itemX + 15, itemY, { width: 85, ellipsis: true });
+      if (!fs.existsSync(rutaAdjunto)) return baseBuffer;
 
-        // Badge de Valor (pequeño cuadro gris para el %)
-        doc.roundedRect(itemX + 100, itemY - 4, 30, 14, 3).fill('#eaecf4');
-        doc.fillColor('#4e73df').font('Helvetica-Bold').fontSize(8)
-            .text(`${segmento.valor}%`, itemX + 100, itemY - 0.5, { align: 'center', width: 30 });
-    });
+      const bytesAdjunto = fs.readFileSync(rutaAdjunto);
+      const pdfOrigen = await PDFLibDocument.load(bytesAdjunto);
 
-    doc.restore();
+      // Recursos gráficos
+      const logoDesarrolloBytes = fs.existsSync('public/desarrollo.png') ? fs.readFileSync('public/desarrollo.png') : null;
+      const logoCvgBytes = fs.existsSync('public/cvg.png') ? fs.readFileSync('public/cvg.png') : null;
+      const logoCvg2Bytes = fs.existsSync('public/CVG2.png') ? fs.readFileSync('public/CVG2.png') : null;
+      const bannerFooterBytes = fs.existsSync('public/footer.png') ? fs.readFileSync('public/footer.png') : null;
 
-    // Retornamos la nueva posición Y para que el siguiente elemento sepa dónde empezar
-    return y + altoCard;
+      const imgDesarrollo = logoDesarrolloBytes ? await pdfDestino.embedPng(logoDesarrolloBytes) : null;
+      const imgCvg = logoCvgBytes ? await pdfDestino.embedPng(logoCvgBytes) : null;
+      const imgCvg2 = logoCvg2Bytes ? await pdfDestino.embedPng(logoCvg2Bytes) : null;
+      const imgFooter = bannerFooterBytes ? await pdfDestino.embedPng(bannerFooterBytes) : null;
+
+      const fuenteHelvetica = await pdfDestino.embedFont(StandardFonts.Helvetica);
+      const fuenteHelveticaBold = await pdfDestino.embedFont(StandardFonts.HelveticaBold);
+
+      const paginasIncrustadas = await pdfDestino.embedPages(pdfOrigen.getPages());
+
+      paginasIncrustadas.forEach((paginaIncrustada) => {
+         const nuevaHoja = pdfDestino.addPage([595.28, 841.89]);
+         nuevaHoja.drawPage(paginaIncrustada, { x: 0, y: 75, width: 595.5, height: 640 });
+         if (imgDesarrollo) nuevaHoja.drawImage(imgDesarrollo, { x: 40, y: 782, height: 40, width: 290 });
+         if (imgCvg) nuevaHoja.drawImage(imgCvg, { x: 450, y: 773, width: 50, height: 50 });
+         if (imgCvg2) nuevaHoja.drawImage(imgCvg2, { x: 510, y: 776, height: 50, width: 50 });
+         nuevaHoja.drawLine({ start: { x: 509, y: 822 }, end: { x: 509, y: 787 }, thickness: 0.5, color: rgb(0.11,0.22,0.42) });
+         nuevaHoja.drawText(heading, { x: 210, y: 750, size: 16, font: fuenteHelveticaBold, color: rgb(0.1,0.1,0.1) });
+         nuevaHoja.drawText('CÓDIGO: FOR-LOG-001 | REVISIÓN: 04', { x: 40, y: 720, size: 8, font: fuenteHelvetica, color: rgb(0.4,0.4,0.4) });
+         if (imgFooter) nuevaHoja.drawImage(imgFooter, { x: 0, y: 0, width: 595.28, height: 140 });
+      });
+
+      const pdfFinalBytes = await pdfDestino.save();
+      return Buffer.from(pdfFinalBytes);
+
+   } catch (error) {
+      console.error('Error en adjuntarAnexosConEstilo:', error);
+      return baseBuffer;
+   }
 };
 
 
-export const generarPlanillaPDF = async (req, res, id) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
-    
-    // Configurar respuesta como PDF adjunto
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=Planilla_Solicitud_${id}.pdf`);
-    
-    doc.pipe(res);
 
-    try {
-        // Consultar info en DB
-        const [soliData] = await pool.query(`
-            SELECT s.*, u.nombres, u.apellidos, u.cedula, g.nombre_gerencia 
-            FROM solicitudes_compra s
-            JOIN usuarios u ON s.id_solicitante = u.id_usuario
-            JOIN gerencias g ON u.id_gerencia = g.id_gerencia
-            WHERE s.id_solicitud = ?
-        `, [id]);
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+const W = 595.28;
+const H = 841.89;
+const ML = 45;
+const MR = 45;
+const CW = W - ML - MR;
 
-        if (soliData.length === 0) {
-            doc.fontSize(16).text("Error: Solicitud no encontrada", 50, 50);
-            doc.end();
-            return;
-        }
+const COLOR_PRIMARY = '#0F3B5C';
+const COLOR_SECONDARY = '#2C6E9E';
+const COLOR_ACCENT = '#F0F7FF';
+const COLOR_TEXT = '#2D3E50';
+const COLOR_TEXT_MUTED = '#6C7A89';
+const COLOR_BORDER = '#E4E7EC';
+const COLOR_ROW_EVEN = '#FFFFFF';
+const COLOR_ROW_ODD = '#F9FBFD';
+const COLOR_SUCCESS = '#2E7D32';
+const COLOR_WARNING = '#ED6C02';
 
-        const solicitud = soliData[0];
-
-        // --- ENCABEZADO PLANILLA ---
-        doc.rect(0, 0, 612, 100).fill(azulPrimario);
-        doc.fillColor('white').fontSize(20).text('PLANILLA DE APROBACIÓN DE SOLICITUD', 50, 40);
-        doc.fontSize(10).text('CVG CABELUM - GESTIÓN DE COMPRAS E INVENTARIO', 50, 70);
-
-        doc.fillColor('#2c3e50').fontSize(14).font('Helvetica-Bold').text(`N° Expediente: #${solicitud.id_solicitud}`, 50, 130);
-        
-        const fechaAprobacion = new Date().toLocaleDateString('es-VE');
-        doc.font('Helvetica').fontSize(10).text(`Fecha Impresión: ${fechaAprobacion}`, 400, 133);
-
-        doc.moveTo(50, 150).lineTo(550, 150).lineWidth(1.5).stroke(azulPrimario);
-
-        // --- DATOS DEL SOLICITANTE ---
-        doc.fillColor('#2c3e50').fontSize(12).font('Helvetica-Bold').text('Datos del Solicitante', 50, 170);
-        doc.fillColor('#555').font('Helvetica').fontSize(11);
-        doc.text(`Nombre Completo: ${solicitud.nombres} ${solicitud.apellidos}`, 50, 195);
-        doc.text(`Cédula de Identidad: ${solicitud.cedula || 'N/A'}`, 50, 215);
-        doc.text(`Gerencia / Departamento: ${solicitud.nombre_gerencia}`, 50, 235);
-
-        // --- DETALLES DE LA SOLICITUD ---
-        doc.fillColor('#2c3e50').fontSize(12).font('Helvetica-Bold').text('Especificaciones de la Solicitud', 50, 275);
-        
-        doc.fillColor('#333').font('Helvetica-Bold').fontSize(11).text('Estado Actual:', 50, 305);
-        let colorEstado = '#f39c12'; // Pendiente amarillo
-        if (solicitud.estado === 'Aprobado') colorEstado = '#27ae60'; // Verde
-        if (solicitud.estado === 'Rechazado') colorEstado = '#e74c3c'; // Rojo
-        doc.fillColor(colorEstado).text(solicitud.estado.toUpperCase(), 150, 305);
-
-        doc.fillColor('#333').font('Helvetica-Bold').text('Monto Estimado:', 50, 325);
-        doc.fillColor('#2c3e50').font('Helvetica').text(`$${Number(solicitud.monto_estimado).toLocaleString('en-US')}`, 150, 325);
-
-        doc.fillColor('#333').font('Helvetica-Bold').text('Resumen del Proyecto:', 50, 345);
-        doc.fillColor('#555').font('Helvetica').text(solicitud.resumen, 50, 365, { width: 480 });
-
-        doc.fillColor('#333').font('Helvetica-Bold').text('Justificación Detallada:', 50, 420);
-        doc.fillColor('#555').font('Helvetica').text(solicitud.justificacion || 'Sin especificación detallada obligatoria por el usuario.', 50, 440, {
-            width: 500,
-            align: 'justify'
-        });
-
-        // --- ÁREA DE FIRMAS ---
-        // Línea divisoria
-        doc.moveTo(50, 620).lineTo(550, 620).lineWidth(1).stroke('#e0e0e0');
-
-        // Firmante 1
-        doc.moveTo(80, 710).lineTo(230, 710).lineWidth(1).stroke('#333');
-        doc.font('Helvetica-Bold').fillColor('#2c3e50').fontSize(10).text('Firma del Solicitante', 80, 720, { width: 150, align: 'center' });
-
-        // Firmante 2
-        doc.moveTo(380, 710).lineTo(530, 710).lineWidth(1).stroke('#333');
-        doc.font('Helvetica-Bold').fillColor('#2c3e50').fontSize(10).text('Sello y Firma Aprobatoria', 380, 720, { width: 150, align: 'center' });
-
-        doc.end();
-    } catch (error) {
-        console.error("Error al generar planilla en PDF:", error);
-        doc.text("Error crítico obteniendo los datos.");
-        doc.end();
-    }
+// --------------------------------------------------------------
+// Datos de ejemplo (simulan una solicitud real)
+// --------------------------------------------------------------
+const solicitudEjemplo = {
+   id_solicitud: 12345,
+   prioridad: 'Alta',
+   estado_nombre: 'Aprobado Gerencia',
+   fecha_creacion: new Date('2025-02-18'),
+   resumen: 'Adquisición de equipos informáticos para la oficina central',
+   justificacion: 'Se requiere actualizar el parque tecnológico debido al aumento de personal y la necesidad de mayor rendimiento en procesos administrativos. Los equipos actuales tienen más de 5 años y generan retrasos.',
+   nombre_completo: 'María Fernanda López',
+   cedula: 'V-12.345.678',
+   nombre_gerencia: 'Tecnología de la Información',
+   cargo_solicitante: 'Coordinadora de Infraestructura TI',
+   aprobador: 'Leda Judith González',
+   cargo_aprobador: 'Gerente de Relaciones Interinstitucionales'
 };
+
+const detallesEjemplo = [
+   { nombre_item: 'Laptop Empresarial 14"', codigo_item: 'NB-HP-14G9', cantidad: 5, unidad_abreviatura: 'UND' },
+   { nombre_item: 'Monitor 24" Full HD', codigo_item: 'MON-LG-24MK', cantidad: 5, unidad_abreviatura: 'UND' },
+   { nombre_item: 'Teclado y Mouse inalámbrico', codigo_item: 'KM-LOGI-MK235', cantidad: 5, unidad_abreviatura: 'KIT' },
+   { nombre_item: 'Silla ergonómica ejecutiva', codigo_item: 'SILL-ERGO-01', cantidad: 3, unidad_abreviatura: 'UND' },
+   { nombre_item: 'Licencia Microsoft 365 Business', codigo_item: 'LIC-MS365-5U', cantidad: 5, unidad_abreviatura: 'LIC' }
+];
+
+// --------------------------------------------------------------
+// Funciones de dibujo (adaptadas de tu código original)
+// --------------------------------------------------------------
+function drawEnhancedHeader(doc, titulo, subtitulo, fecha, logoIzqPath, logoDerPath) {
+   const top = 25;
+   const headerHeight = 90;
+   doc.roundedRect(ML, top, CW, headerHeight, 8)
+      .strokeColor(COLOR_BORDER).lineWidth(0.8).stroke();
+
+   const leftLogoX = ML;
+   const leftLogoW = 90;
+   doc.roundedRect(leftLogoX, top, leftLogoW, headerHeight, 8)
+      .strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+   if (fs.existsSync(logoIzqPath)) {
+      const imgWidth = 70, imgHeight = 60;
+      const imgX = leftLogoX + (leftLogoW - imgWidth) / 2;
+      const imgY = top + (headerHeight - imgHeight) / 2;
+      doc.image(logoIzqPath, imgX, imgY, { width: imgWidth, height: imgHeight });
+   } else {
+      doc.fontSize(8).fillColor(COLOR_TEXT_MUTED).text('LOGO', leftLogoX + leftLogoW / 2, top + headerHeight / 2, { align: 'center' });
+   }
+
+   const centerX = leftLogoX + leftLogoW;
+   const centerW = CW - 180;
+   doc.roundedRect(centerX, top, centerW, headerHeight, 8)
+      .strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+   doc.fontSize(14).font('Helvetica-Bold').fillColor(COLOR_PRIMARY)
+      .text(titulo.toUpperCase(), centerX + 5, top + 28, { width: centerW - 10, align: 'center' });
+   if (subtitulo) {
+      doc.fontSize(8).font('Helvetica').fillColor(COLOR_TEXT_MUTED)
+         .text(subtitulo, centerX + 5, top + 54, { width: centerW - 10, align: 'center' });
+   }
+
+   const rightLogoX = centerX + centerW;
+   const rightLogoW = 90;
+   doc.roundedRect(rightLogoX, top, rightLogoW, headerHeight, 8)
+      .strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+   if (fs.existsSync(logoDerPath)) {
+      const imgWidth = 70, imgHeight = 40;
+      const imgX = rightLogoX + (rightLogoW - imgWidth) / 2;
+      const imgY = top + 15;
+      doc.image(logoDerPath, imgX, imgY, { width: imgWidth, height: imgHeight });
+   } else {
+      doc.fontSize(10).font('Helvetica-Bold').fillColor(COLOR_SECONDARY)
+         .text('Cabelum', rightLogoX + rightLogoW / 2, top + 28, { align: 'center' });
+   }
+   doc.fontSize(7).font('Helvetica').fillColor(COLOR_TEXT_MUTED)
+      .text(fecha, rightLogoX + 5, top + 62, { width: rightLogoW - 10, align: 'center' });
+}
+
+function drawInfoCards(doc, sol, startY) {
+   const cardHeight = 70;
+   const gap = 15;
+   const cardWidth = (CW - gap * 3) / 4;
+   let y = startY;
+   let x = ML;
+   const cards = [
+      { label: 'Solicitud N°', value: `#${sol.id_solicitud}` },
+      { label: 'Prioridad', value: sol.prioridad || 'Media', colorBadge: true },
+      { label: 'Estado', value: sol.estado_nombre || 'Pendiente', colorBadge: true },
+      { label: 'Fecha', value: new Date(sol.fecha_creacion).toLocaleDateString('es-VE') }
+   ];
+   for (let i = 0; i < cards.length; i++) {
+      doc.roundedRect(x, y, cardWidth, cardHeight, 6)
+         .fillColor('#FFFFFF').fill()
+         .strokeColor(COLOR_BORDER).lineWidth(0.8).stroke();
+      doc.fontSize(7).font('Helvetica-Bold').fillColor(COLOR_TEXT_MUTED)
+         .text(cards[i].label, x + 12, y + 12);
+      let value = cards[i].value;
+      let textColor = COLOR_TEXT;
+      if (cards[i].colorBadge) {
+         if (value === 'Alta') textColor = COLOR_WARNING;
+         else if (value === 'Aprobado Gerencia') textColor = COLOR_SUCCESS;
+      }
+      doc.fontSize(12).font('Helvetica-Bold').fillColor(textColor)
+         .text(value, x + 12, y + 32);
+      x += cardWidth + gap;
+      if ((i + 1) % 4 === 0) { x = ML; y += cardHeight + 15; }
+   }
+   return y;
+}
+
+function drawModernItemsTable(doc, detalles, startY) {
+   const cols = [40, 210, 80, 65, 70];
+   const heads = ['#', 'Descripción', 'Código', 'Cantidad', 'Unidad'];
+   const rowH = 28;
+   let y = startY;
+   let tableX = ML;
+   const tableW = CW;
+   doc.roundedRect(tableX, y, tableW, rowH, 4)
+      .fillColor(COLOR_ACCENT).fill()
+      .rect(tableX, y, tableW, rowH)
+      .strokeColor(COLOR_BORDER).lineWidth(0.6).stroke();
+   let hx = tableX;
+   for (let i = 0; i < heads.length; i++) {
+      doc.fontSize(8.5).font('Helvetica-Bold').fillColor(COLOR_PRIMARY)
+         .text(heads[i], hx + 6, y + 9, { width: cols[i] - 12, align: i === 1 ? 'left' : 'center' });
+      hx += cols[i];
+   }
+   y += rowH;
+   detalles.forEach((item, idx) => {
+      if (y > H - 120) return;
+      const bgColor = idx % 2 === 0 ? COLOR_ROW_EVEN : COLOR_ROW_ODD;
+      let vx = tableX;
+      doc.roundedRect(vx, y, tableW, rowH, 4)
+         .fillColor(bgColor).fill()
+         .rect(vx, y, tableW, rowH)
+         .strokeColor(COLOR_BORDER).lineWidth(0.4).stroke();
+      const vals = [
+         String(idx + 1),
+         item.nombre_item || '—',
+         item.codigo_item || '—',
+         String(item.cantidad || 1),
+         item.unidad_abreviatura || 'UND'
+      ];
+      for (let i = 0; i < vals.length; i++) {
+         doc.fontSize(8).font('Helvetica').fillColor(COLOR_TEXT)
+            .text(vals[i], vx + 6, y + 9, { width: cols[i] - 12, align: i === 1 ? 'left' : 'center', lineBreak: false });
+         vx += cols[i];
+      }
+      y += rowH;
+   });
+   if (detalles.length) {
+      doc.fontSize(7).font('Helvetica-Oblique').fillColor(COLOR_TEXT_MUTED)
+         .text('* Los ítems mostrados corresponden a la solicitud actual.', ML, y + 10);
+      y += 20;
+   }
+   return y;
+}
+
+function drawTechnicalSpecsPage(doc, sol, detalles) {
+   doc.addPage();
+   doc.moveTo(ML, 40).lineTo(W - MR, 40).strokeColor(COLOR_PRIMARY).lineWidth(0.8).stroke();
+   doc.fontSize(22).font('Helvetica-Bold').fillColor(COLOR_PRIMARY)
+      .text('Especificaciones Técnicas', 0, 55, { align: 'center' });
+   doc.fontSize(10).font('Helvetica').fillColor(COLOR_TEXT_MUTED)
+      .text(sol.resumen || 'Detalle de la solicitud', 0, 85, { align: 'center' });
+   doc.moveTo(ML, 100).lineTo(W - MR, 100).strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+
+   const infoY = 120;
+   const leftCol = ML;
+   const rightCol = W / 2 + 20;
+   doc.fontSize(9).font('Helvetica-Bold').fillColor(COLOR_PRIMARY).text('SOLICITANTE:', leftCol, infoY);
+   doc.font('Helvetica').fillColor(COLOR_TEXT).text(sol.nombre_completo, leftCol, infoY + 16);
+   doc.fontSize(8).fillColor(COLOR_TEXT_MUTED)
+      .text(`Cédula: ${sol.cedula}`, leftCol, infoY + 32)
+      .text(`Gerencia: ${sol.nombre_gerencia}`, leftCol, infoY + 48);
+   doc.fontSize(9).font('Helvetica-Bold').fillColor(COLOR_PRIMARY).text('DESTINATARIO:', rightCol, infoY);
+   doc.font('Helvetica').fillColor(COLOR_TEXT).text('GCIA DE PROCURA', rightCol, infoY + 16);
+   doc.fontSize(8).fillColor(COLOR_TEXT_MUTED).text('Para atención de compras y contrataciones', rightCol, infoY + 32);
+
+   const justY = infoY + 90;
+   doc.fontSize(9).font('Helvetica-Bold').fillColor(COLOR_PRIMARY).text('Justificación:', ML, justY);
+   doc.font('Helvetica').fillColor(COLOR_TEXT)
+      .text(sol.justificacion, ML, justY + 18, { width: CW, align: 'justify', lineGap: 4, indent: 12 });
+
+   let tableY = justY + 80;
+   if (detalles && detalles.length) {
+      doc.fontSize(10).font('Helvetica-Bold').fillColor(COLOR_PRIMARY).text('Ítems solicitados:', ML, tableY);
+      tableY += 20;
+      tableY = drawModernItemsTable(doc, detalles, tableY);
+   }
+
+   const signaturesY = Math.max(tableY + 40, 620);
+   doc.roundedRect(ML, signaturesY, CW, 130, 8).strokeColor(COLOR_BORDER).lineWidth(0.8).stroke();
+   const leftSigX = ML + 25, rightSigX = W / 2 + 20;
+   doc.fontSize(9).font('Helvetica-Bold').fillColor(COLOR_PRIMARY).text('ELABORADO POR:', leftSigX, signaturesY + 20);
+   doc.font('Helvetica').fillColor(COLOR_TEXT).text(sol.nombre_completo, leftSigX, signaturesY + 38);
+   doc.fontSize(8).fillColor(COLOR_TEXT_MUTED).text(`Cargo: ${sol.cargo_solicitante}`, leftSigX, signaturesY + 54);
+   doc.moveTo(leftSigX, signaturesY + 85).lineTo(leftSigX + 180, signaturesY + 85).stroke();
+   doc.fontSize(7).fillColor(COLOR_TEXT_MUTED).text('Firma', leftSigX, signaturesY + 92)
+      .text(`Fecha: ${new Date().toLocaleDateString('es-VE')}`, leftSigX + 100, signaturesY + 92);
+
+   doc.fontSize(9).font('Helvetica-Bold').fillColor(COLOR_PRIMARY).text('APROBADO POR:', rightSigX, signaturesY + 20);
+   doc.font('Helvetica').fillColor(COLOR_TEXT).text(sol.aprobador, rightSigX, signaturesY + 38);
+   doc.fontSize(8).fillColor(COLOR_TEXT_MUTED).text(`Cargo: ${sol.cargo_aprobador}`, rightSigX, signaturesY + 54);
+   doc.moveTo(rightSigX, signaturesY + 85).lineTo(rightSigX + 180, signaturesY + 85).stroke();
+   doc.fontSize(7).fillColor(COLOR_TEXT_MUTED).text('Firma', rightSigX, signaturesY + 92)
+      .text(`Fecha: ${new Date().toLocaleDateString('es-VE')}`, rightSigX + 100, signaturesY + 92);
+}
+
+async function pdfkitToBuffer(doc) {
+   return new Promise((resolve, reject) => {
+      const chunks = [];
+      doc.on('data', c => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+      doc.end();
+   });
+}
+
+// --------------------------------------------------------------
+// Función principal que genera el PDF de ejemplo
+// --------------------------------------------------------------
+// Versión que retorna el Buffer (no guarda en disco)
+export async function generarPlanillaPDF() {
+   const fechaStr = new Date().toLocaleDateString('es-VE', { day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase();
+   const logoIzqPath = path.join(dirname, 'assets', 'images', 'logo_izquierda.png');
+   const logoDerPath = path.join(dirname, 'assets', 'images', 'logo_derecha.png');
+
+   const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: false });
+
+   // Página 1 - Portada
+   doc.addPage();
+   drawEnhancedHeader(doc, 'JUSTIFICACIÓN DE PEDIDO', solicitudEjemplo.resumen, fechaStr, logoIzqPath, logoDerPath);
+   let currentY = 140;
+   currentY = drawInfoCards(doc, solicitudEjemplo, currentY);
+   doc.fontSize(10).font('Helvetica-Bold').fillColor(COLOR_PRIMARY).text('Resumen de la solicitud', ML, currentY + 15);
+   doc.fontSize(9).font('Helvetica').fillColor(COLOR_TEXT).text(solicitudEjemplo.resumen, ML, currentY + 35, { width: CW, align: 'justify' });
+   doc.fontSize(10).font('Helvetica-Bold').fillColor(COLOR_PRIMARY).text('Justificación', ML, currentY + 85);
+   doc.fontSize(9).font('Helvetica').fillColor(COLOR_TEXT).text(solicitudEjemplo.justificacion, ML, currentY + 105, { width: CW, align: 'justify' });
+
+   // Página 2 - Detalle
+   doc.addPage();
+   drawEnhancedHeader(doc, 'DETALLE DE LA SOLICITUD', 'Lista de productos y/o servicios solicitados', fechaStr, logoIzqPath, logoDerPath);
+   drawModernItemsTable(doc, detallesEjemplo, 140);
+
+   // Página 3 - Especificaciones
+   drawTechnicalSpecsPage(doc, solicitudEjemplo, detallesEjemplo);
+
+   const pdfkitBuffer = await pdfkitToBuffer(doc);
+   const mainDoc = await LibDocument.load(pdfkitBuffer);
+   const helv = await mainDoc.embedFont(StandardFonts.Helvetica);
+   const pages = mainDoc.getPages();
+
+   for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+      const { width, height } = page.getSize();
+      const fy = 35;
+      page.drawText(`Elaborado por: ${solicitudEjemplo.nombre_completo}`, {
+         x: ML, y: fy, size: 7, font: helv, color: rgb(0.47, 0.52, 0.60)
+      });
+      page.drawText(`Página ${i + 1} de ${pages.length}`, {
+         x: width - MR - 50, y: fy, size: 7, font: helv, color: rgb(0.47, 0.52, 0.60)
+      });
+      page.drawLine({
+         start: { x: ML, y: fy + 12 }, end: { x: width - MR, y: fy + 12 },
+         thickness: 0.3, color: rgb(0.8, 0.82, 0.85)
+      });
+   }
+
+   const finalBuffer = Buffer.from(await mainDoc.save());
+   return finalBuffer;  // ← retorna el buffer, no guarda archivo
+}
+

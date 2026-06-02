@@ -3,7 +3,7 @@ import Bg from '../Componets/bg';
 import Sidebar from '../Componets/Componentes Grandes/Siderbar';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Database, Download, Upload, AlertTriangle, ShieldCheck, CheckCircle, History, X } from 'lucide-react';
-import AlertItem from '../Componets/Alerts.jsx';
+import { toast } from '../Componets/GoeyToaster';
 import ConfirmationModal from '../Componets/Confirmacion.jsx';
 
 const BackupDatabase = () => {
@@ -13,9 +13,10 @@ const BackupDatabase = () => {
     const [loadingImport, setLoadingImport] = useState(false);
     const [file, setFile] = useState(null);
     const [backupsList, setBackupsList] = useState([]);
+    const [selectedBackup, setSelectedBackup] = useState(null);
+    const [loadingRestore, setLoadingRestore] = useState(false);
 
     // --- ESTADOS Y MANEJO DE ALERTAS GLOBALES ---
-    const [alerts, setAlerts] = useState([]);
     const [confModal, setConfModal] = useState({
         isOpen: false,
         type: 'question',
@@ -23,15 +24,6 @@ const BackupDatabase = () => {
         message: '',
         onConfirm: () => { }
     });
-
-    const addAlert = useCallback((type, title, message) => {
-        const id = Date.now();
-        setAlerts(prev => [...prev, { id, type, title, message }]);
-    }, []);
-
-    const removeAlert = useCallback((id) => {
-        setAlerts(prev => prev.filter(a => a.id !== id));
-    }, []);
 
     const triggerAction = (config) => {
         setConfModal({
@@ -83,11 +75,11 @@ const BackupDatabase = () => {
             link.click();
             link.remove();
 
-            addAlert('success', 'Backup Exitoso', 'Base de datos exportada con éxito. Archivo descargado en tu equipo y conservado localmente.');
+            toast.success('Backup Exitoso — Base de datos exportada con éxito. Archivo descargado en tu equipo y conservado localmente.');
             fetchBackups();
         } catch (error) {
             console.error(error);
-            addAlert('error', 'Error Exportando', 'Ocurrió un error al procesar el respaldo: ' + error.message);
+            toast.error('Error Exportando — Ocurrió un error al procesar el respaldo: ' + error.message);
         } finally {
             setLoadingExport(false);
         }
@@ -96,7 +88,7 @@ const BackupDatabase = () => {
     const handleImportSubmit = (e) => {
         e.preventDefault();
         if (!file) {
-            addAlert('error', 'Falta archivo', 'Por favor, selecciona un archivo SQL primero para importar.');
+            toast.error('Falta archivo — Por favor, selecciona un archivo SQL primero para importar.');
             return;
         }
 
@@ -121,12 +113,12 @@ const BackupDatabase = () => {
                         throw new Error(data.error || "Error al intentar importar la base de datos.");
                     }
 
-                    addAlert('success', 'Restauración Exitosa', '¡Base de datos restaurada correctamente! Sistema reconstruido.');
+                    toast.success('Restauración Exitosa — ¡Base de datos restaurada correctamente! Sistema reconstruido.');
                     setFile(null);
                     document.getElementById('file-upload').value = null;
                 } catch (error) {
                     console.error(error);
-                    addAlert('error', 'Importación Fallida', error.message);
+                    toast.error('Importación Fallida — ' + error.message);
                 } finally {
                     setLoadingImport(false);
                 }
@@ -136,9 +128,7 @@ const BackupDatabase = () => {
 
     return (
         <>
-            <Nav />
-            <Bg />
-            <Sidebar />
+
 
             {mostrarPoliticas && (
                 <div className="fixed inset-0 z-[100] bg-slate-900/60 overflow-hidden backdrop-blur-sm flex items-center justify-center p-4">
@@ -164,12 +154,7 @@ const BackupDatabase = () => {
 
             <div className={`z-10 ml-[60px] max-lg:ml-0 h-[calc(100dvh-60px)] max-lg:h-max overflow-auto bg-gray-50 flex overflow-y-auto ${mostrarPoliticas ? 'blur-[2px] select-none pointer-events-none' : ''}`}>
 
-                {/* CONTENEDOR DE ALERTAS FLOTANTES */}
-                <div className="fixed top-6 right-6 z-[100] flex flex-col items-end pointer-events-none">
-                    {alerts.map(alert => (
-                        <AlertItem key={alert.id} {...alert} onClose={removeAlert} />
-                    ))}
-                </div>
+                {/* toasts handled globally by GoeyToaster */}
 
                 {/* MODAL DE CONFIRMACIÓN ÚNICO Y DINÁMICO */}
                 <ConfirmationModal
@@ -361,7 +346,10 @@ const BackupDatabase = () => {
                                             </tr>
                                         ) : (
                                             backupsList.map((b, i) => (
-                                                <tr key={i} className="border-b border-slate-50 hover:bg-emerald-50/50 transition-colors group/row">
+                                                <tr
+                                                    key={i}
+                                                    onClick={() => setSelectedBackup(prev => prev === b.name ? null : b.name)}
+                                                    className={`border-b border-slate-50 transition-colors group/row cursor-pointer ${selectedBackup === b.name ? 'bg-emerald-50 ring-1 ring-emerald-100' : 'hover:bg-emerald-50/50'}`}>
                                                     <td className="py-4 px-4 font-medium text-blue-600 flex items-center gap-2">
                                                         <Database className="w-4 h-4 text-emerald-400" />
                                                         {b.name}
@@ -375,6 +363,52 @@ const BackupDatabase = () => {
                                         )}
                                     </tbody>
                                 </table>
+                            </div>
+                            <div className="mt-4 flex items-center justify-end gap-3">
+                                <button onClick={() => setMostrarModalHistorial(false)} className="px-4 py-2 bg-slate-100 rounded-xl">Cerrar</button>
+                                <button
+                                    onClick={() => {
+                                        if (!selectedBackup) { toast.error('Selecciona un punto de restauración primero'); return; }
+                                        triggerAction({
+                                            title: 'Restaurar punto de control',
+                                            message: `Vas a restaurar la base de datos desde: ${selectedBackup}. Esto reemplazará la base actual. ¿Deseas continuar?`,
+                                            type: 'danger',
+                                            action: async () => {
+                                                setLoadingRestore(true);
+                                                try {
+                                                    const resp = await fetch(`http://${window.location.hostname}:5000/api/restore/server`, {
+                                                        method: 'POST',
+                                                        credentials: 'include',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({ fileName: selectedBackup })
+                                                    });
+                                                    const data = await resp.json().catch(() => ({}));
+                                                    if (!resp.ok) throw new Error(data.error || data.message || 'Error al restaurar');
+                                                    toast.success(data.message || 'Restauración completada con éxito.');
+                                                    setMostrarModalHistorial(false);
+                                                    setSelectedBackup(null);
+                                                    fetchBackups();
+                                                } catch (err) {
+                                                    console.error(err);
+                                                    toast.error('Restauración Fallida — ' + err.message);
+                                                } finally {
+                                                    setLoadingRestore(false);
+                                                }
+                                            }
+                                        });
+                                    }}
+                                    disabled={!selectedBackup || loadingRestore}
+                                    className={`px-4 py-2 rounded-2xl font-bold text-white ${!selectedBackup || loadingRestore ? 'bg-slate-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                                >
+                                    {loadingRestore ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                            Restaurando...
+                                        </>
+                                    ) : (
+                                        <>Restaurar seleccionado</>
+                                    )}
+                                </button>
                             </div>
                         </div>
                     </div>

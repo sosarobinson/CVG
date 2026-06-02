@@ -74,3 +74,14 @@ export const ToastContainer = ({ toasts, removeToast }) => {
         </div>
     );
 };
+
+// Compatibilidad: re-exportar el toaster global (Goey) como helper
+import { toast as goeyToast } from './GoeyToaster';
+export const goey = goeyToast;
+export const notify = (type, message) => {
+    if (!type) type = 'info';
+    if (type === 'success') goeyToast.success(message);
+    else if (type === 'error') goeyToast.error(message);
+    else if (type === 'warning') goeyToast.warn(message);
+    else goeyToast.info(message);
+};

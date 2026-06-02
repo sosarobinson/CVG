@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../Constext/AuthToken";
 import ChatPopup from "../Mensajeria/Chat";
 
-const UserCarrucel = ({ users, loading = false, datauser }) => {
+const UserCarrucel = ({ users, loading = false, datauser, interactive = true }) => {
 
   const [selectedUser, setSelectedUser] = useState(null);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -36,26 +36,66 @@ const UserCarrucel = ({ users, loading = false, datauser }) => {
   );
 
   return (
-    <div className="relative">
-      <AvatarGroup className="grayscale hover:grayscale-0 transition-all">
-        {users?.slice(0, 3).map((user, index) => (
-          <Avatar
-            key={user.id || index}
-            size="default"
-            onClick={() => handleSelectUser(user)}
-            className="cursor-pointer hover:-translate-y-1 transition-transform"
-          >
-            <AvatarImage src={user.avatar} alt={user.name} />
-            <AvatarFallback>{user.initials}</AvatarFallback>
-          </Avatar>
-        ))}
+    <div className="relative h-fit w-fit  ">
+      {/* Grid: 2 columnas. Primera fila: 2 avatares. Segunda fila: tercer avatar + contador */}
+      <div className="transition-all flex items-center justify-center">
+        <div className={`grid  gap-1 items-center justify-center ${users?.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          {/* Primera fila: dos avatares */}
+          <div className="flex items-center -space-x-2">
+            {users?.[0] && (
+              <Avatar
+                key={users[0].id || 'u0'}
+                size="default"
+                onClick={() => interactive && handleSelectUser(users[0])}
+                className={`cursor-pointer ${interactive ? 'hover:-translate-y-1 transition-transform' : ''}`}
+              >
+                <AvatarImage src={users[0].avatar} alt={users[0].name} />
+                <AvatarFallback>{users[0].initials}</AvatarFallback>
+              </Avatar>
+            )}
 
-        {users?.length > 3 && (
-          <AvatarGroupCount size="default">
-            +{users.length - 3}
-          </AvatarGroupCount>
-        )}
-      </AvatarGroup>
+            {users?.[1] && (
+              <Avatar
+                key={users[1].id || 'u1'}
+                size="default"
+                onClick={() => interactive && handleSelectUser(users[1])}
+                className={`cursor-pointer ${interactive ? 'hover:-translate-y-1 transition-transform' : ''}`}
+              >
+                <AvatarImage src={users[1].avatar} alt={users[1].name} />
+                <AvatarFallback>{users[1].initials}</AvatarFallback>
+              </Avatar>
+            )}
+          </div>
+
+          {/* placeholder para mantener la estructura */}
+          <div className="flex items-center justify-center"></div>
+
+          {/* Segunda fila: tercer avatar + contador (estilo cuadrado) */}
+          <div className="col-span-2 ml-2 -mt-2 flex items-center justify-center -space-x-1">
+            {users?.[2] && (
+              <Avatar
+                key={users[2].id || 'u2'}
+                size="default"
+                onClick={() => interactive && handleSelectUser(users[2])}
+                
+                className={`cursor-pointer ${interactive ? 'hover:-translate-y-1 transition-transform' : ''}`}
+              >
+                <AvatarImage src={users[2].avatar} alt={users[2].name} />
+                <AvatarFallback>{users[2].initials}</AvatarFallback>
+              </Avatar>
+            )}
+
+            {users && users.length > 3 && (
+              <AvatarGroupCount
+                size="default"
+                className="rounded-full  text-sm bg-slate-100/60 border border-slate-200 flex items-center justify-center -ml-0"
+              >
+                +{users.length - 3}
+              </AvatarGroupCount>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* RENDERIZADO DEL CHAT O BURBUJA */}
       {selectedUser && (

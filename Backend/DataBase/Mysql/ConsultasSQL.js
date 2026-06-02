@@ -175,119 +175,194 @@ const verificarUsuarios = async (body = {}) => {
 
 
 const solicitudESCOMPRA = async (body = {}) => {
-    const { id, page = 1, limit = 10, estado, busqueda } = body;
-    const offset = (page - 1) * limit;
+    const {
+        userId: userIdParam,
+        roleId: roleIdParam,
+        gerenciaId: gerenciaIdParam,
+        id: legacyId,
+        page = 1,
+        limit = 10,
+        estado,
+        busqueda
+    } = body;
 
+    const userId = userIdParam || legacyId || null;
+    const roleId = roleIdParam ?? null;
+    const offset = (Number(page) - 1) * Number(limit);
 
-    let baseSelect = `
-      SELECT 
-    s.id_solicitud,
-    s.fecha_creacion,
-    g.nombre_gerencia,
-    g.codigo,
-    s.id_solicitante,
-    CONCAT(u.nombres, ' ', u.apellidos) AS nombre_completo,
-    s.justificacion,
-    s.resumen, 
-    s.monto_estimado,
-    s.estado
-FROM solicitudes_compra s
-JOIN gerencias g ON s.id_gerencia = g.id_gerencia
-JOIN usuarios u ON s.id_solicitante = u.id_usuario
-
-    `;
-
-    let baseCount = `
-        SELECT 
-          COUNT(*) as total,
-          COUNT(CASE WHEN estado = 'Aprobado' THEN 1 END) as aprobados,
-          COUNT(CASE WHEN estado = 'Pendiente' THEN 1 END) as pendientes,
-          COUNT(CASE WHEN estado = 'Rechazado' THEN 1 END) as rechazados
-        FROM solicitudes_compra s
-        WHERE 1=1
-    `;
-
-    let conditions = [];
-    let values = [];
-
-    if (id) {
-        conditions.push("s.id_gerencia = (SELECT id_gerencia FROM usuarios WHERE id_usuario = ?)");
-        values.push(id);
-
+    // Si no se pasa gerenciaId, intentamos obtenerla desde la BD
+    let gerenciaId = gerenciaIdParam ?? null;
+    if (!gerenciaId && userId) {
+        try {
+            const [gRows] = await pool.execute('SELECT id_gerencia FROM usuarios WHERE id_usuario = ? LIMIT 1', [userId]);
+            gerenciaId = gRows[0]?.id_gerencia ?? null;
+        } catch (e) {
+            gerenciaId = null;
+        }
     }
 
+    // Obtener nombre de rol si es necesario (para diferenciar 'Ventas' de 'Gerente')
+    let nombreRol = null;
+    if (roleId) {
+        try {
+            const [rRows] = await pool.execute('SELECT nombre_rol FROM roles WHERE id_rol = ? LIMIT 1', [roleId]);
+            nombreRol = rRows[0]?.nombre_rol ?? null;
+        } catch (e) {
+            nombreRol = null;
+        }
+    }
+
+    // Construcción dinámica del WHERE con visibilidad por rol
+    let whereClause = ' WHERE 1=1';
+    const values = [];
+
+    // Búsqueda global (aplica a todos los registros visibles)
+    if (busqueda) {
+        whereClause += ' AND (s.id_solicitud LIKE ? OR s.resumen LIKE ? OR CONCAT(u.nombres, " ", u.apellidos) LIKE ?)';
+        const term = `%${busqueda}%`;
+        values.push(term, term, term);
+    }
+
+    // Construir condiciones de visibilidad (owner OR role-specific)
+    const isAdmin = Number(roleId) === 1 || Number(roleId) === 5;
+    if (!isAdmin) {
+        const visibilityParts = [];
+
+        // 1) Propietario: siempre ve sus propias solicitudes (sin importar estado)
+        if (userId) {
+            visibilityParts.push('s.id_solicitante = ?');
+            values.push(userId);
+        }
+
+        // 2) Gerente (id_rol = 8) -> solo solicitudes de su gerencia (a menos que sea 'Ventas')
+        if (Number(roleId) === 8 && nombreRol !== 'Ventas') {
+            if (gerenciaId !== null) {
+                visibilityParts.push('s.id_gerencia = ?');
+                values.push(gerenciaId);
+            } else {
+                visibilityParts.push('1 = 0');
+            }
+        }
+
+        // 3) Comprador (id_rol = 10): solo estados 3,5,6
+        if (Number(roleId) === 10) {
+            visibilityParts.push('s.id_estado IN (3,5,6)');
+        }
+
+        // 4) Ventas (detectar por nombre de rol): solo estados 5,6
+        if (nombreRol === 'Ventas') {
+            visibilityParts.push('s.id_estado IN (5,6)');
+        }
+
+        // 5) Almacén (id_rol = 9): solo ver estados iniciales; excluimos 3,5,6
+        if (Number(roleId) === 9) {
+            visibilityParts.push('s.id_estado NOT IN (3,5,6)');
+        }
+
+        // Si no hay ninguna regla (rol desconocido), permitir solo propias solicitudes si existe userId
+        if (visibilityParts.length === 0) {
+            if (!userId) {
+                visibilityParts.push('1 = 0');
+            }
+        }
+
+        // Combinamos por OR (propietario OR regla_rol)
+        whereClause += ' AND (' + visibilityParts.join(' OR ') + ')';
+    }
+
+    // Filtro por estado (aplica a registros visibles)
     if (estado) {
-        conditions.push("s.estado = ?");
+        whereClause += ' AND e.nombre = ?';
         values.push(estado);
     }
 
-    if (busqueda) {
-        conditions.push("(s.id_solicitud LIKE ? OR s.resumen LIKE ?)");
-        const term = `%${busqueda}%`;
-        values.push(term, term);
-    }
+    // SELECT principal
+    const baseSelect = `
+      SELECT
+    s.id_solicitud,
+    s.fecha_creacion,
+    g.nombre_gerencia,
+    s.id_gerencia,
+    s.id_solicitante,
+    CONCAT(u.nombres, ' ', u.apellidos) AS nombre_completo,
+    s.justificacion,
+    s.resumen,
+    s.tipo_solicitud,
+    u.avatar,
+    u.id_usuario AS id_solicitante,
+    e.id_estado,
+    e.nombre AS estado_nombre,
+    e.color_hex AS estado_color
+FROM solicitudes_compra s
+JOIN gerencias g ON s.id_gerencia = g.id_gerencia
+JOIN usuarios u ON s.id_solicitante = u.id_usuario
+LEFT JOIN estados_solicitud e ON s.id_estado = e.id_estado
+${whereClause}
+ORDER BY 
+    FIELD(e.nombre, 
+    'En Compras', 
+    'Aprobado Gerencia', 
+    'Aprovadas', 
+    'Pendiente', 
+    'Rechazado'
+    ) ASC, 
+    s.fecha_creacion DESC
+LIMIT ? OFFSET ?
+    `;
 
-    if (conditions.length > 0) {
-        const condStr = " AND " + conditions.join(" AND ");
-        baseSelect += condStr;
-        baseCount += condStr;
-    }
+    const baseCount = `
+        SELECT
+            COUNT(*) AS total,
+            COUNT(CASE WHEN e.nombre = 'Aprobado Gerencia' THEN 1 END) AS aprobados,
+            COUNT(CASE WHEN e.nombre = 'Pendiente'         THEN 1 END) AS pendientes,
+            COUNT(CASE WHEN e.nombre = 'Rechazado'         THEN 1 END) AS rechazados,
+            COUNT(CASE WHEN e.nombre = 'En Compras'        THEN 1 END) AS en_compras,
+            COUNT(CASE WHEN e.nombre = 'Finalizado'        THEN 1 END) AS finalizados
+        FROM solicitudes_compra s
+        LEFT JOIN estados_solicitud e ON s.id_estado = e.id_estado
+        ${whereClause}
+    `;
 
-    baseSelect += " ORDER BY s.fecha_creacion DESC LIMIT ? OFFSET ?";
-
-    const valuesCount = [...values];
-    const valuesSelect = [...values, Number(limit), Number(offset)];
-
+    const [countResult] = await pool.execute(baseCount, values);
+    const valuesSelect = [...values, Number(limit) || 10, Number(offset) || 0];
     const [rows] = await pool.execute(baseSelect, valuesSelect);
-    const [countResult] = await pool.execute(baseCount, valuesCount);
 
     return {
         rows,
         totalRows: {
-            total: countResult[0].total || 0,
-            pendientes: countResult[0].pendientes || 0,
-            aprobados: countResult[0].aprobados || 0,
-            rechazados: countResult[0].rechazados || 0,
+            total: countResult[0]?.total || 0,
+            pendientes: countResult[0]?.pendientes || 0,
+            aprobados: countResult[0]?.aprobados || 0,
+            rechazados: countResult[0]?.rechazados || 0,
+            en_compras: countResult[0]?.en_compras || 0,
+            finalizados: countResult[0]?.finalizados || 0,
         }
     };
-}
+};
 
-const getMensajes = async (userId, withUser = null, limitChats = null) => {
-    try {
+const getMensajes = async (userId, idChat, offset = 0, limit = 20) => {
+        try {
 
-        let sql = `
-         SELECT 
-    m.id_mensaje,
-    c.id_solicitud,
-    m.id_emisor AS fromId,
-    m.contenido AS mensaje,
-    m.fecha_envio AS time,
-    m.leido AS view,
-    -- Datos completos del Emisor (Remitente)
-    u_emi.id_usuario AS id_remitente,
-    u_emi.username AS remitente_username,
-    u_emi.nombres AS remitente_nombres,
-    u_emi.apellidos AS remitente_apellidos,
-    u_emi.avatar AS remitente_avatar,
-    -- Datos completos del Destinatario (La otra persona en el chat)
-    u_dest.id_usuario AS toId,
-    u_dest.username AS destinatario_username,
-    u_dest.nombres AS destinatario_nombres,
-    u_dest.apellidos AS destinatario_apellidos,
-    u_dest.avatar AS destinatario_avatar
-FROM chats c
-INNER JOIN  mensajes m ON m.id_chat = c.id_chat
-INNER JOIN usuarios u_emi ON m.id_emisor = u_emi.id_usuario
+                const sql = `
+            SELECT 
+                m.id_mensaje,
+                m.contenido AS mensaje,
+                mm.contenido AS respuesta,
+                m.id_respuesta,
+                m.fecha_envio,
+                CONCAT(u.nombres, ' ', u.apellidos) AS nombre_completo,
+                u.avatar,
+                (m.id_emisor = ?) AS ismy,
+                u.id_usuario
+            FROM mensajes m
+            LEFT JOIN usuarios u ON u.id_usuario = m.id_emisor
+            LEFT JOIN mensajes mm ON mm.id_mensaje = m.id_respuesta
+            WHERE m.id_chat = ?
+            ORDER BY m.fecha_envio DESC
+            LIMIT ? OFFSET ?;
+                `;
 
-INNER JOIN chat_participantes cp ON c.id_chat = cp.id_chat AND m.id_emisor != ?
-INNER JOIN usuarios u_dest ON cp.id_usuario = u_dest.id_usuario
-
-WHERE   u_dest.id_usuario != ?;
-
-         
-        `;
-
-        const params = [userId, userId];
+                const params = [userId, idChat, Number(limit), Number(offset)];
 
 
 
@@ -310,11 +385,16 @@ export const getChat = async (userId) => {
         if (!userId) {
             return { success: false, mensage: "NO HAS INICIADO SECCION" }
         }
-        const params = [userId, userId, userId];
+        // El SQL `chatSQL` utiliza múltiples placeholders para el mismo userId
+        const params = [userId, userId, userId, userId, userId, userId, userId];
         const sql = chatSQL
         const [rows] = await pool.execute(sql, params);
 
-        return { success: true, rows };
+        // Como la consulta trae DESC para paginación, revertimos para enviar
+        // los mensajes en orden cronológico ascendente al frontend.
+        const ordered = Array.isArray(rows) ? rows.reverse() : rows;
+
+        return { success: true, rows: ordered };
 
     } catch (error) {
         console.error('Error fetching messages:', error);
@@ -339,14 +419,14 @@ const getSolicitante = async (idSolicitud) => {
     }
 };
 
-const insertMensaje = async (idRemitente, idDestinatario, mensaje, tipo = 'general', idSolicitud = null) => {
+const insertMensaje = async (idRemitente, idDestinatario, mensaje, tipo = 'general', idSolicitud = null, idRespuesta = null) => {
     try {
         // 1. Buscamos o creamos el chat entre estas dos personas
         const idChat = await obtenerOCrearChat(idRemitente, idDestinatario, idSolicitud);
 
         // 2. Insertamos el mensaje usando el idChat obtenido
         // Nota: insertMensajeSQL ahora solo debe pedir [id_chat, id_emisor, contenido]
-        const [result] = await pool.execute(insertMensajeSQL, [idChat, idRemitente, mensaje]);
+        const [result] = await pool.execute(insertMensajeSQL, [idChat, idRemitente, mensaje, idRespuesta]);
 
         return {
             success: true,
@@ -360,29 +440,55 @@ const insertMensaje = async (idRemitente, idDestinatario, mensaje, tipo = 'gener
 };
 
 
-// Función para obtener o crear un chat entre dos personas
+// Función para obtener o crear un chat entre dos personas o asociado a una solicitud
 const obtenerOCrearChat = async (id1, id2, idSolicitud = null) => {
-    // 1. Buscar si ya existe
-    const [existente] = await pool.execute(buscarChatPrivadoSQL, [id1, id2]);
+    try {
+        // Si se especificó una solicitud, tratamos el chat como grupal vinculado a la solicitud
+        if (idSolicitud) {
+            const [rows] = await pool.execute('SELECT id_chat FROM chats WHERE id_solicitud = ? LIMIT 1', [idSolicitud]);
+            if (rows && rows.length > 0) return rows[0].id_chat;
 
-    if (existente.length > 0) return existente[0].id_chat;
+            // Crear chat grupal asociado a la solicitud
+            const [created] = await pool.execute(crearChatSQL, ['grupal', idSolicitud]);
+            const idChat = created.insertId;
 
-    // 2. Si no existe, crear el chat
-    const [nuevoChat] = await pool.execute(crearChatSQL, ['individual', idSolicitud]);
-    const idChat = nuevoChat.insertId;
+            // Insertar participante: solicitante (si existe en la solicitud)
+            try {
+                const [sol] = await pool.execute('SELECT id_solicitante FROM solicitudes_compra WHERE id_solicitud = ? LIMIT 1', [idSolicitud]);
+                const solicitante = sol && sol.length ? sol[0].id_solicitante : null;
+                if (solicitante) {
+                    await pool.execute('INSERT IGNORE INTO chat_participantes (id_chat, id_usuario) VALUES (?, ?)', [idChat, solicitante]);
+                }
+            } catch (e) { /* no crítico */ }
 
-    // 3. Añadir a ambos participantes
-    await pool.execute(insertarParticipanteSQL, [idChat, id1]);
-    await pool.execute(insertarParticipanteSQL, [idChat, id2]);
+            // Añadir al remitente y opcionalmente al receptor si se pasó
+            if (id1) await pool.execute('INSERT IGNORE INTO chat_participantes (id_chat, id_usuario) VALUES (?, ?)', [idChat, id1]);
+            if (id2 && id2 !== id1) await pool.execute('INSERT IGNORE INTO chat_participantes (id_chat, id_usuario) VALUES (?, ?)', [idChat, id2]);
 
-    return idChat;
+            return idChat;
+        }
+
+        // Caso privado: buscamos por la relación entre dos participantes (tipo 'individual')
+        const [existente] = await pool.execute(buscarChatPrivadoSQL, [id1, id2]);
+        if (existente.length > 0) return existente[0].id_chat;
+
+        // No existe: crear chat individual (sin id_solicitud)
+        const [nuevoChat] = await pool.execute(crearChatSQL, ['individual', null]);
+        const idChat = nuevoChat.insertId;
+        await pool.execute(insertarParticipanteSQL, [idChat, id1]);
+        if (id2) await pool.execute(insertarParticipanteSQL, [idChat, id2]);
+        return idChat;
+    } catch (err) {
+        console.error('Error en obtenerOCrearChat:', err);
+        throw err;
+    }
 };
 
 // Modifica tu función de insertar mensaje
-const registrarMensaje = async (idEmisor, idReceptor, contenido, idSolicitud = null) => {
+const registrarMensaje = async (idEmisor, idReceptor, contenido, idSolicitud = null, idRespuesta = null) => {
     try {
         const idChat = await obtenerOCrearChat(idEmisor, idReceptor, idSolicitud);
-        const [result] = await pool.execute(insertMensajeSQL, [idChat, idEmisor, contenido]);
+        const [result] = await pool.execute(insertMensajeSQL, [idChat, idEmisor, contenido, idRespuesta]);
         return { success: true, insertId: result.insertId, idChat };
     } catch (error) {
         console.error(error);
@@ -431,6 +537,21 @@ const germensaje = async (withUserId, myId, offset = 0) => {
             avatar: m.remitente_avatar
         }
     }));
+
+    // Añadir metadatos de respuesta si existen
+    mensajesFormateados.forEach((mf, idx) => {
+        const row = rows[idx];
+        if (row.id_respuesta) {
+            mf.reply = {
+                id: row.id_respuesta,
+                mensaje: row.respuesta_contenido,
+                remitente: {
+                    name: row.respuesta_nombres ? `${row.respuesta_nombres} ${row.respuesta_apellidos}` : null,
+                    avatar: row.respuesta_avatar || null
+                }
+            };
+        }
+    });
 
     // 4. Revertimos el array antes de enviarlo
     // Como los trajimos DESC (para la paginación), los invertimos para que 
