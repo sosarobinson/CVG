@@ -307,7 +307,7 @@ ORDER BY
     'Rechazado'
     ) ASC, 
     s.fecha_creacion DESC
-LIMIT ? OFFSET ?
+LIMIT ${Math.max(1, parseInt(limit) || 10)} OFFSET ${Math.max(0, parseInt(offset) || 0)}
     `;
 
     const baseCount = `
@@ -324,8 +324,7 @@ LIMIT ? OFFSET ?
     `;
 
     const [countResult] = await pool.execute(baseCount, values);
-    const valuesSelect = [...values, Number(limit) || 10, Number(offset) || 0];
-    const [rows] = await pool.execute(baseSelect, valuesSelect);
+    const [rows] = await pool.execute(baseSelect, values);
 
     return {
         rows,

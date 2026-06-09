@@ -149,11 +149,13 @@ export const exportToAccess = async (req, res) => {
       return Number.isNaN(n) ? defaultVal : n;
     };
 
-    // Detectar tipos de campo en Access para construir las consultas correctamente
+    // Defaults basados en esquema real de Compras.mdb:
+    // NReqCompra=Text(130), CCosto=Text(130), Cod_Prioridad=Text(130)
+    // Comprador=Number(5), MontoRC=Number(5), NRenglon=Number(5), Cantidad=Number(5)
     let nreqIsNumeric = false;
     let compradorIsNumeric = true;
-    let ccostoIsNumeric = true;
-    let codPriorIsNumeric = true;
+    let ccostoIsNumeric = false;
+    let codPriorIsNumeric = false;
     let nrenglonIsNumeric = true;
     let cantidadIsNumeric = true;
     try {
@@ -268,44 +270,29 @@ export const exportToAccess = async (req, res) => {
             ${compradorSql}, 
             ${fmtDate(s.fecha_creacion)}, 
             ${fmtDate(s.fecha_creacion)}, 
-            '${tipoRC}', 
-            'No', 
+            '${tipoRC}',
+            False,
             ${codPriorSql}
           )
         `;
         console.log('[Migracion] insertHeaderQuery:', insertHeaderQuery);
-        try {
-          await connectionAccess.execute(insertHeaderQuery);
-        } catch (insErr) {
-          console.error(`[Migracion] insertHeaderQuery falló para ${NReqCompra}:`, insErr.message);
-          // Si falla por mismatch de tipos, intentar insertar usando solo el id numérico
-          if (insErr?.message?.includes('No coinciden los tipos de datos') || (insErr?.message || '').toLowerCase().includes('data type')) {
-            const altNReq = num(s.id_solicitud);
-            const insertHeaderQueryAlt = insertHeaderQuery.replace(`'${NReqCompra}'`, `${altNReq}`);
-            console.log('[Migracion] intentando insertHeaderQuery alternativo:', insertHeaderQueryAlt);
-            await connectionAccess.execute(insertHeaderQueryAlt);
-          } else {
-            throw insErr;
-          }
-        }
+        await connectionAccess.execute(insertHeaderQuery);
 
         // Consultar renglones de la solicitud en MySQL
         const [details] = await pool.query(`
-          SELECT 
-            d.cantidad, 
-            p.codigo_producto, 
-            p.nombre_producto, 
+          SELECT
+            d.cantidad,
+            p.codigo_producto,
+            p.nombre_producto,
             um.abreviatura AS unidad_producto,
-            srv.codigo_servicio, 
+            srv.codigo_servicio,
             srv.nombre_servicio,
-            c_p.codigo AS categoria_producto,
-            c_s.codigo AS categoria_servicio
+            c_p.codigo AS categoria_producto
           FROM detalles_solicitud d
           LEFT JOIN productos_almacen p ON d.id_producto = p.id_producto
           LEFT JOIN servicios srv ON d.id_servicio = srv.id_servicio
           LEFT JOIN unidades_medida um ON p.id_unidad = um.id_unidad
           LEFT JOIN categorias c_p ON p.id_categoria = c_p.id_categoria
-          LEFT JOIN categorias c_s ON srv.id_categoria = c_s.id_categoria
           WHERE d.id_solicitud = ?
         `, [s.id_solicitud]);
 
@@ -317,7 +304,7 @@ export const exportToAccess = async (req, res) => {
           const Descripcion = d.nombre_producto || d.nombre_servicio || 'SIN DESCRIPCION';
           const Unidad = d.unidad_producto || 'C/U';
           const Cantidad = num(d.cantidad, 1);
-          const Cod_Tipo = d.categoria_producto || d.categoria_servicio || (s.tipo_solicitud === 'Compra' ? 'CO01' : 'ST01');
+          const Cod_Tipo = d.categoria_producto || (s.tipo_solicitud === 'Compra' ? 'CO01' : 'ST01');
 
           const nrenglonSql = nrenglonIsNumeric ? `${NRenglon}` : `'${NRenglon}'`;
           const cantidadSql = cantidadIsNumeric ? `${Cantidad}` : `'${Cantidad}'`;
