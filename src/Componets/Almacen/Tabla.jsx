@@ -26,6 +26,10 @@ const Tabla = ({ data = [], alSeleccionar, loading: apiLoading, currentPage = 1,
     const [createData, setCreateData] = useState({});
     const [contextData, setContextData] = useState({ categorias: [], gerencias: [], productos: [] });
     const activeTab = propActiveTab;
+    // Estados para búsqueda asincrónica de productos (carga por demanda)
+    const [productSearch, setProductSearch] = useState('');
+    const [productResults, setProductResults] = useState([]);
+    const [productLoading, setProductLoading] = useState(false);
 
     const manejarCambio = (tabName) => {
         if (alSeleccionar) alSeleccionar(tabName);
@@ -51,23 +55,58 @@ const Tabla = ({ data = [], alSeleccionar, loading: apiLoading, currentPage = 1,
         fetchContext();
     }, [activeTab]);
 
-    // Carga la lista completa de productos SOLO cuando se abre el modal de
-    // "Nuevo Movimiento" — es el único selector que necesita todos los productos.
-    // Usa /productos SIN ?page para mantener compatibilidad con el endpoint.
+    // Carga inicial (paginada) de productos al abrir el modal de movimientos
     useEffect(() => {
         if (!createModalOpen || activeTab !== 'movimientos') return;
-        if (contextData.productos.length > 0) return; // ya cargados, no repetir
-        const load = async () => {
+        let cancelled = false;
+        const controller = new AbortController();
+
+        const loadInitial = async () => {
+            setProductLoading(true);
             try {
-                const res = await fetch(`http://${window.location.hostname}:5000/productos`, { credentials: 'include' });
+                const params = new URLSearchParams({ page: 1, limit: 30 });
+                const res = await fetch(`http://${window.location.hostname}:5000/productos?${params}`, { credentials: 'include', signal: controller.signal });
+                if (!res.ok) return;
                 const json = await res.json();
-                setContextData(prev => ({ ...prev, productos: json.data || [] }));
+                if (!cancelled) setProductResults(json.data || []);
             } catch (err) {
-                console.error('Error cargando productos para selector:', err);
+                if (err.name !== 'AbortError') console.error('Error cargando productos (inicial):', err);
+            } finally {
+                if (!cancelled) setProductLoading(false);
             }
         };
-        load();
+
+        loadInitial();
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
     }, [createModalOpen, activeTab]);
+
+    // Búsqueda paginada (debounce) según lo que escribe el usuario
+    useEffect(() => {
+        if (!createModalOpen || activeTab !== 'movimientos') return;
+        const controller = new AbortController();
+        const handler = setTimeout(async () => {
+            setProductLoading(true);
+            try {
+                const params = new URLSearchParams({ page: 1, limit: 30, ...(productSearch && { search: productSearch }) });
+                const res = await fetch(`http://${window.location.hostname}:5000/productos?${params}`, { credentials: 'include', signal: controller.signal });
+                if (!res.ok) return;
+                const json = await res.json();
+                setProductResults(json.data || []);
+            } catch (err) {
+                if (err.name !== 'AbortError') console.error('Error buscando productos:', err);
+            } finally {
+                setProductLoading(false);
+            }
+        }, 300);
+
+        return () => {
+            controller.abort();
+            clearTimeout(handler);
+        };
+    }, [productSearch, createModalOpen, activeTab]);
 
     const handleCreateChange = (e) => {
         const { name, value } = e.target;

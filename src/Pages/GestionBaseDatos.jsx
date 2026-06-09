@@ -282,13 +282,13 @@ export default function GestionBaseDatos() {
         icon={Server}
         label="Guardar en Servidor"
         description="El archivo queda en /backups con timestamp. Sin descarga al navegador."
-        onClick={handleBackupServer}
+        onClick={() => triggerAction({ title: 'Generar backup en servidor', message: 'Se generará una copia de seguridad y se guardará en el servidor (/backups). ¿Deseas continuar?', type: 'question', action: handleBackupServer })}
       />
       <OptionCard
         icon={Download}
         label="Descargar Copia Local"
         description="Streaming directo al navegador. También se guarda una copia en el servidor."
-        onClick={handleBackupDownload}
+        onClick={() => triggerAction({ title: 'Descargar backup', message: 'Descargarás una copia local de la base de datos. ¿Confirmas la descarga?', type: 'question', action: handleBackupDownload })}
       />
     </div>
   );
@@ -329,7 +329,14 @@ export default function GestionBaseDatos() {
           className="hidden"
           onChange={e => {
             const file = e.target.files?.[0];
-            if (file) handleRestoreUpload(file);
+            if (file) {
+              triggerAction({
+                title: 'Restaurar desde archivo',
+                message: 'Vas a restaurar la base de datos desde un archivo local. Esto reemplazará la base de datos actual. ¿Deseas continuar?',
+                type: 'danger',
+                action: () => handleRestoreUpload(file)
+              });
+            }
             e.target.value = '';
           }}
         />
@@ -341,7 +348,7 @@ export default function GestionBaseDatos() {
   <div className="max-w-2xl w-full bg-white rounded-2xl">
     {/* Mensaje Informativo */}
     <div className="mb-4 text-sm text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-center gap-2">
-      <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse flex-shrink-0" />
+      <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shrink-0" />
       Selecciona un archivo .sql desde los puntos de control almacenados en el servidor.
     </div>
 
@@ -489,12 +496,12 @@ export default function GestionBaseDatos() {
           <div>
             <SectionLabel>Migración Access ↔ MySQL</SectionLabel>
             <div className="flex flex-col gap-2">
-              <button onClick={handleMigrar} disabled={migrState.status === 'loading'}
+              <button onClick={() => triggerAction({ title: 'Ejecutar pipeline', message: 'Vas a ejecutar el pipeline de migración (Access → MySQL). Esta operación modificará la base de datos. ¿Deseas continuar?', type: 'danger', action: handleMigrar })} disabled={migrState.status === 'loading'}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 text-white text-[13px] font-semibold hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all">
                 {migrState.status === 'loading' ? <Loader2 size={14} className="animate-spin" /> : <ArrowDownToLine size={14} />}
                 Ejecutar Pipeline (Access → MySQL)
               </button>
-              <button onClick={handleExport} disabled={exportState.status === 'loading'}
+              <button onClick={() => triggerAction({ title: 'Exportar Solicitudes', message: 'Se exportarán las solicitudes a Access. ¿Confirmas la exportación?', type: 'question', action: handleExport })} disabled={exportState.status === 'loading'}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-zinc-200 bg-white text-zinc-700 text-[13px] font-semibold hover:bg-zinc-50 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all">
                 {exportState.status === 'loading' ? <Loader2 size={14} className="animate-spin" /> : <ArrowUpFromLine size={14} />}
                 Exportar Solicitudes a Access

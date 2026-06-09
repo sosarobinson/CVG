@@ -34,14 +34,37 @@ export default function TablaServicios({
                 </div>
 
                 <div className="flex items-center gap-3 ml-auto">
-                    <div className="w-72">
+                    <div className="">
                         <Input label="Buscar" value={search} onChange={e => setSearch(e.target.value)} className="h-10" />
                     </div>
 
-                    <div className="hidden sm:flex items-center gap-2 border rounded-lg p-1">
-                        <button onClick={() => setViewMode('table')} className={`p-1 rounded ${viewMode === 'table' ? 'bg-slate-100' : ''}`}><List size={16} /></button>
-                        <button onClick={() => setViewMode('grid')} className={`p-1 rounded ${viewMode === 'grid' ? 'bg-slate-100' : ''}`}><Grid size={16} /></button>
-                    </div>
+               <div className="hidden sm:flex items-center gap-0.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 shadow-sm select-none">
+  {/* Botón Vista de Tabla / Lista */}
+  <button 
+    onClick={() => setViewMode('table')} 
+    title="Vista de lista"
+    className={`p-2 rounded-lg transition-all duration-200 flex items-center justify-center active:scale-95
+      ${viewMode === 'table' 
+        ? 'bg-white text-indigo-600 shadow-sm font-medium' 
+        : 'text-slate-500 hover:text-slate-800 hover:bg-white/40'
+      }`}
+  >
+    <List size={16} className={viewMode === 'table' ? 'stroke-[2.5]' : 'stroke-[2]'} />
+  </button>
+
+  {/* Botón Vista de Grid / Tarjetas */}
+  <button 
+    onClick={() => setViewMode('grid')} 
+    title="Vista de cuadrícula"
+    className={`p-2 rounded-lg transition-all duration-200 flex items-center justify-center active:scale-95
+      ${viewMode === 'grid' 
+        ? 'bg-white text-indigo-600 shadow-sm font-medium' 
+        : 'text-slate-500 hover:text-slate-800 hover:bg-white/40'
+      }`}
+  >
+    <Grid size={16} className={viewMode === 'grid' ? 'stroke-[2.5]' : 'stroke-[2]'} />
+  </button>
+</div>
 
                     <button
                         onClick={() => setCreateModalOpen()}

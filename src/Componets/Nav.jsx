@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import Logo from "./logo.jsx"
 import ChatPopup from './Mensajeria/Chat.jsx';
 import { useAuth } from '../Constext/AuthToken.jsx';
-import { Avatar } from './Avatar.jsx';
+import { Avatar, AvatarImage, AvatarFallback } from './Avatar.jsx';
 import { Mensageria } from './Mensajeria/Mensageria.jsx';
 import BotonBandeja from './Mensajeria/BotonBandeja.jsx';
 import { useSocket } from '../Constext/SocketContext.jsx';
 import { Link } from 'react-router-dom';
+import { Eye } from 'lucide-react';
 import ProfileModal from './ProfileModal.jsx';
 
 
@@ -189,11 +190,10 @@ export default function Nav() {
               >
 
 
-                <img
-                  src={`${datauser.data.avatar}`}
-                  className="w-8 h-8 rounded-full aspect-square object-cover ring-2 ring-white"
-                  alt="Perfil"
-                />
+                <Avatar className="w-8 h-8 ring-2 ring-white">
+                  <AvatarImage src={datauser.data.avatar} alt="Perfil" className="object-cover" />
+                  <AvatarFallback>{datauser.data.name ? datauser.data.name.charAt(0).toUpperCase() : ''}</AvatarFallback>
+                </Avatar>
                 <div className="absolute p-0.5 flex items-center backdrop-blur-sm bg-white/90 rounded-full bottom-0 -right-1">
                   <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse"></div>
                 </div>
@@ -268,12 +268,12 @@ export default function Nav() {
             </div>
           </div>
 
-          {!canCreateUser && (
-            <div className="px-4 py-2 text-xs text-amber-600">No tienes permiso para crear usuarios. Rol detectado: <span className="font-semibold text-amber-800">{effectiveRole || '—'}</span>{fullProfile?.id_rol ? <span className="text-xs ml-2 text-slate-500">(perfil:{fullProfile.id_rol})</span> : null}</div>
-          )}
+        
 
-          <div className="px-2 mb-2">
-            <button onClick={() => { setShowProfileModal(true); setIsMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors duration-200">Ver Perfil</button>
+          <div className="px-1 flex items-center mb-2">
+         
+            <button onClick={() => { setShowProfileModal(true); setIsMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors duration-200">
+                 <Eye size={16} className="text-slate-500" />Ver Perfil</button>
           </div>
 
           <div className="p-1">

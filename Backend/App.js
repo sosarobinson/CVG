@@ -3,6 +3,9 @@ import session from 'express-session';
 import cors from 'cors';
 import morgan from 'morgan';
 import os from 'os';
+import dotenv from 'dotenv';
+
+dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -58,7 +61,6 @@ app.use(cors(corsOptions));
 // Preflight será manejado automáticamente por el middleware CORS global.
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 const sessionMiddleware = session({
     name: process.env.SESSION_COOKIE_NAME || 'mi_sid',
     secret: process.env.SESSION_SECRET || 'keyboard cat',

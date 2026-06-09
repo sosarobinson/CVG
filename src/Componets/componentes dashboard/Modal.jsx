@@ -76,7 +76,7 @@ const FullModal = ({ onClose, contenido, hidden = false, padding = true, title, 
       <div
         onClick={(e) => e.stopPropagation()}
         className={`
-          bg-white relative shadow-2xl modal-content
+           justify-center items-center relative shadow-2xl modal-content
           flex flex-col 
           w-dvw h-full rounded-none
         `}
@@ -85,7 +85,7 @@ const FullModal = ({ onClose, contenido, hidden = false, padding = true, title, 
         <Close onClose={handleClose} className='hidden' />
 
         {/* Contenedor de contenido optimizado */}
-        <div className={`w-full h-full custom-scrollbar ${padding ? 'p-8' : 'p-0'}`}>
+        <div className={`w-9/10 h-9/10 overflow-hidden rounded-2xl custom-scrollbar ${padding ? 'p-8' : 'p-0'}`}>
           {contenido}
         </div>
       </div>

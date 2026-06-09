@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Save, AlertCircle } from 'lucide-react';
 import { toast } from '../GoeyToaster';
+import { Modal } from '../componentes dashboard/Modal.jsx';
 
 export default function ModalNuevoServicio({ isOpen, onClose, onSuccess }) {
     // Estado inicial limpio para la creación
@@ -53,21 +54,22 @@ export default function ModalNuevoServicio({ isOpen, onClose, onSuccess }) {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100">
-
+     <Modal isOpen={isOpen} onClose={onClose}  
+     contenido={
+           <>
+        
                 {/* Header del Modal */}
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
+                <div className="p-6 border-b min-w-[500px] max-md:min-w-auto border-slate-100 flex justify-between items-center bg-white">
                     <div>
                         <h2 className="text-xl font-bold text-slate-800">Crear Nuevo Servicio</h2>
                         <p className="text-xs text-slate-400">Introduce los detalles del servicio técnico</p>
                     </div>
-                    <button
+                    {/* <button
                         onClick={onClose}
                         className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-red-500 transition-all"
                     >
                         <X size={20} />
-                    </button>
+                    </button> */}
                 </div>
 
                 {/* Formulario */}
@@ -123,13 +125,13 @@ export default function ModalNuevoServicio({ isOpen, onClose, onSuccess }) {
 
                     {/* Botones de Acción */}
                     <div className="flex gap-3 pt-2">
-                        <button
+                        {/* <button
                             type="button"
                             onClick={onClose}
                             className="flex-1 py-3.5 text-sm font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all"
                         >
                             Cancelar
-                        </button>
+                        </button> */}
                         <button
                             type="submit"
                             disabled={loading}
@@ -146,7 +148,8 @@ export default function ModalNuevoServicio({ isOpen, onClose, onSuccess }) {
                         </button>
                     </div>
                 </form>
-            </div>
-        </div>
+        </>
+     }
+     />
     );
 }

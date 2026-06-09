@@ -28,229 +28,228 @@ const PALETTE = {
 // =========================================================================
 // 1. CONTROLADOR PRINCIPAL DE EXPRESS (PDFKit)
 // =========================================================================
+// =========================================================================
+// 1. CONTROLADOR PRINCIPAL DE EXPRESS (PDFKit)
+// =========================================================================
+export const generarPDFBuffer = async (id) => {
+   return new Promise(async (resolve, reject) => {
+      try {
+         // Obtención de datos de la solicitud con JOINs precisos
+         const [rows] = await pool.query(
+            `SELECT s.*, 
+                    s.justificacion_pdf_url, 
+                    s.requerimientos_pdf_url, 
+                    s.requerimientos_texto, 
+                    s.justificacion, 
+                    s.tipo_solicitud, 
+                    u.nombres, 
+                    u.apellidos, 
+                    u.cedula,
+                    g.nombre_gerencia AS departamento, 
+                    e.nombre AS estado_actual,
+                    IF(s.justificacion_pdf_url IS NOT NULL AND s.justificacion_pdf_url != '', 1, 0) AS tiene_justificacion_pdf,
+                    IF(s.requerimientos_pdf_url IS NOT NULL AND s.requerimientos_pdf_url != '', 1, 0) AS tiene_requerimientos_pdf
+             FROM solicitudes_compra s
+             JOIN usuarios u ON s.id_solicitante = u.id_usuario
+             JOIN gerencias g ON s.id_gerencia = g.id_gerencia
+             JOIN estados_solicitud e ON s.id_estado = e.id_estado
+             WHERE s.id_solicitud = ?`, [id]
+         );
+
+         if (!rows.length) return reject(new Error('Solicitud no encontrada'));
+         const sol = rows[0];
+
+         // Obtención de los ítems asociados a la solicitud
+         const [items] = await pool.query(
+            `SELECT ds.*, 
+                    COALESCE(p.nombre_producto, s.nombre_servicio) as descripcion,
+                    COALESCE(p.codigo_producto, s.codigo_servicio) as nro_parte,
+                    um.abreviatura as unidad
+             FROM detalles_solicitud ds
+             LEFT JOIN productos_almacen p ON ds.id_producto = p.id_producto
+             LEFT JOIN servicios s ON ds.id_servicio = s.id_servicio
+             LEFT JOIN unidades_medida um ON p.id_unidad = um.id_unidad
+             WHERE ds.id_solicitud = ?`, [id]
+         );
+
+         // Configuración de la instancia de PDFKit
+         const doc = new PDFDocument({ 
+            size: 'A4', 
+            margins: { top: 40, bottom: 40, left: 40, right: 40 },
+            bufferPages: true 
+         });
+         
+         const fragments = [];
+         doc.on('data', (chunk) => fragments.push(chunk));
+
+         let currentY = 20;
+
+         // --- COMPONENTES VISUALES INTERNOS ---
+         const dibujarCabeceraLogos = (yCoord) => {
+            doc.image('public/desarrollo.png', 40, yCoord, { height: 40, width: 290 });
+            doc.image('public/cvg.png', 450, yCoord - 9, { width: 50, height: 50 });
+            doc.moveTo(509, yCoord).lineTo(509, yCoord + 35).lineWidth(0.5).strokeColor(PALETTE.primary).stroke();
+            doc.image('public/CVG2.png', 510, yCoord - 6, { height: 50, width: 50 });
+         };
+
+         const dibujarTitulosFormulario = (yCoord) => {
+            doc.fillColor(PALETTE.text).font('Helvetica-Bold').fontSize(14).text('SOLICITUD DE COMPRA Y SUMINISTROS', 165, yCoord + 16);
+            doc.fontSize(8).fillColor(PALETTE.muted).font('Helvetica').text('CÓDIGO: FOR-LOG-001 | REVISIÓN: 04', 40, yCoord + 55);
+         };
+
+         const dibujarSubHeaderTabla = (yCoord) => {
+            doc.rect(40, yCoord, 515, 20).fill(PALETTE.primary);
+            const headers = ['#', 'DESCRIPCIÓN TÉCNICA', 'NRO. PARTE', 'CANT.', 'UNIDAD'];
+            let startX = 45;
+            headers.forEach((h, i) => {
+               doc.fillColor(PALETTE.white).fontSize(8).font('Helvetica-Bold').text(h, startX, yCoord + 6);
+               startX += i === 0 ? 30 : i === 1 ? 280 : i === 2 ? 80 : 60;
+            });
+         };
+
+         // --- CONSTRUCCIÓN MAQUETA BASE ---
+         dibujarCabeceraLogos(currentY);
+         currentY += 60;
+         dibujarTitulosFormulario(currentY);
+         currentY += 55;
+         
+         // Indicador de control numérico correlativo
+         doc.roundedRect(420, currentY, 135, 45, 8).fill(PALETTE.accent);
+         doc.fillColor(PALETTE.primary).fontSize(7).font('Helvetica-Bold').text('NRO. CONTROL', 430, currentY + 10);
+         doc.fontSize(14).text(`SCS-${String(id).padStart(5, '0')}`, 430, currentY + 22);
+         doc.fontSize(8).fillColor(PALETTE.muted).font('Helvetica').text('Tipo de solicitud:', 40, currentY + 15);
+         doc.fontSize(9).fillColor(PALETTE.primary).font('Helvetica-Bold').text(sol.tipo_solicitud, 101, currentY + 15);
+         currentY += 60;
+
+         // Bloque de identificación de metadata
+         const drawField = (label, value, x, y, width) => {
+            doc.fillColor(PALETTE.muted).fontSize(7).font('Helvetica-Bold').text(label, x, y);
+            doc.fillColor(PALETTE.text).fontSize(9).font('Helvetica').text(value || 'N/A', x, y + 12, { width: width });
+         };
+         doc.rect(40, currentY, 515, 60).strokeColor(PALETTE.border).stroke();
+         drawField('DEPARTAMENTO SOLICITANTE', sol.departamento.toUpperCase(), 55, currentY + 10, 200);
+         drawField('FECHA DE EMISIÓN', new Date(sol.fecha_creacion).toLocaleDateString('es-VE'), 300, currentY + 10, 100);
+         drawField('PRIORIDAD', (sol.prioridad || 'NORMAL').toUpperCase(), 450, currentY + 10, 80);
+         drawField('SOLICITANTE', `${sol.nombres} ${sol.apellidos} (V-${sol.cedula})`, 55, currentY + 35, 250);
+         drawField('ESTADO ACTUAL', sol.estado_actual.toUpperCase(), 300, currentY + 35, 200);
+         currentY += 80;
+
+         // Sección de justificación estructurada
+         doc.fillColor(PALETTE.primary).fontSize(10).font('Helvetica-Bold').text('JUSTIFICACIÓN Y ALCANCE', 40, currentY);
+         doc.rect(40, currentY + 15, 515, 50).fill(PALETTE.accent);
+         doc.fillColor(PALETTE.text).fontSize(8).font('Helvetica').text(sol.justificacion || 'Sin justificación detallada.', 50, currentY + 23, { width: 495, align: 'justify' });
+         currentY += 85;
+
+         // Renderizado del subencabezado de la tabla
+         dibujarSubHeaderTabla(currentY);
+         currentY += 20;
+
+         // Ciclo dinámico de ítems cargados
+         items.forEach((item, index) => {
+            if (currentY > 680) {
+               doc.addPage(); 
+               currentY = 20;
+               dibujarCabeceraLogos(currentY);
+               currentY += 60;
+               dibujarTitulosFormulario(currentY);
+               currentY += 75;
+               dibujarSubHeaderTabla(currentY);
+               currentY += 20;
+            }
+            const isEven = index % 2 === 0;
+            if (isEven) doc.rect(40, currentY, 515, 20).fill('#f1f5f9');
+
+            doc.fillColor(PALETTE.text).fontSize(8).font('Helvetica');
+            doc.text(index + 1, 45, currentY + 6);
+            doc.text(item.descripcion, 75, currentY + 6, { width: 270, height: 10, ellipsis: true });
+            doc.text(item.nro_parte || 'S/C', 355, currentY + 6);
+            doc.text(item.cantidad, 435, currentY + 6);
+            doc.text(item.unidad || 'UND', 495, currentY + 6);
+            currentY += 20; 
+         });
+
+         // Cuadro inferior reglamentario de firmas
+         if (currentY > 640) {
+            doc.addPage(); currentY = 20; dibujarCabeceraLogos(currentY); dibujarTitulosFormulario(currentY); currentY += 90;
+         } else {
+            currentY = Math.max(currentY + 30, 580);
+         }
+         const SIGNATURE_BOX_HEIGHT = 80;
+         doc.rect(40, currentY, 515, SIGNATURE_BOX_HEIGHT).strokeColor(PALETTE.border).stroke();
+
+         const drawSignature = (title, x) => {
+            doc.moveTo(x, currentY + 50).lineTo(x + 140, currentY + 50).strokeColor(PALETTE.muted).stroke();
+            doc.fillColor(PALETTE.primary).fontSize(7).font('Helvetica-Bold').text(title, x, currentY + 55, { width: 140, align: 'center' });
+            doc.fillColor(PALETTE.muted).fontSize(6).font('Helvetica').text('FIRMA Y SELLO', x, currentY + 65, { width: 140, align: 'center' });
+         };
+         drawSignature('SOLICITANTE', 60);
+         drawSignature('GERENTE DE ÁREA', 227);
+         drawSignature('RECEPCIÓN PROCURA', 395);
+
+         // Estampado de cintillo inferior institucional
+         const totalPages = doc.bufferedPageRange().count;
+         for (let i = 0; i < totalPages; i++) {
+            doc.switchToPage(i);
+            doc.image('public/footer.png', 0, 705, { width: 595.28, height: 140 });
+         }
+
+         // Interceptor del fin del flujo de PDFKit
+         doc.on('end', async () => {
+            try {
+               // 1. Inicializamos el buffer dinámico con el resultado maestro de PDFKit
+               let pdfBufferActual = Buffer.concat(fragments);
+
+               // ====================================================================
+               // FASE B: PROCESAR BLOQUE DE JUSTIFICACIÓN Y ALCANCE
+               // ====================================================================
+               const rutaPdfJustificacion = `Backend/uploads/solicitudes/${sol.justificacion_pdf_url}`;
+
+               if (sol.tiene_justificacion_pdf === 1 && fs.existsSync(rutaPdfJustificacion)) {
+                  console.log('Acoplando archivo PDF físico de Justificación...');
+                  pdfBufferActual = await adjuntarAnexosConEstilo(pdfBufferActual, rutaPdfJustificacion, 'Justificación y Alcance');
+               } else {
+                  console.log('No se detectó PDF de justificación. Generando desde campo de texto...');
+                  const textoJustificacion = sol.justificacion || 'No se registró justificación detallada en texto.';
+                  pdfBufferActual = await generarHojaTextoAlternativo(pdfBufferActual, textoJustificacion, 'Justificación y Alcance');
+               }
+
+               // ====================================================================
+               // FASE A: PROCESAR BLOQUE DE REQUERIMIENTOS TÉCNICOS
+               // ====================================================================
+               const rutaPdfRequerimientos = `Backend/uploads/solicitudes/${sol.requerimientos_pdf_url}`;
+
+               if (sol.tiene_requerimientos_pdf === 1 && fs.existsSync(rutaPdfRequerimientos)) {
+                  console.log('Acoplando archivo PDF físico de Requerimientos...');
+                  pdfBufferActual = await adjuntarAnexosConEstilo(pdfBufferActual, rutaPdfRequerimientos, 'Especificaciones Técnicas');
+               } else {
+                  console.log('No se detectó PDF de requerimientos. Generando desde campo de texto...');
+                  const textoRequerimientos = sol.requerimientos_texto || 'No se registraron especificaciones técnicas en texto.';
+                  pdfBufferActual = await generarHojaTextoAlternativo(pdfBufferActual, textoRequerimientos, 'Requerimientos Técnicos');
+               }
+
+               resolve(pdfBufferActual);
+            } catch (err) {
+               console.error('Error crítico procesando la fase final del PDF:', err);
+               reject(err);
+            }
+         });
+
+         // Cerramos de forma definitiva el documento maestro
+         doc.end();
+
+      } catch (error) {
+         console.error('Error crítico general:', error);
+         reject(error);
+      }
+   });
+};
+
 export const generarPDF = async (req, res, id) => {
    try {
-      // Obtención de datos de la solicitud con JOINs precisos
-      const [rows] = await pool.query(
-         `SELECT s.*, 
-                 s.justificacion_pdf_url, 
-                 s.requerimientos_pdf_url, 
-                 s.requerimientos_texto, 
-                 s.justificacion, 
-                 s.tipo_solicitud, 
-                 u.nombres, 
-                 u.apellidos, 
-                 u.cedula,
-                 g.nombre_gerencia AS departamento, 
-                 e.nombre AS estado_actual,
-                 IF(s.justificacion_pdf_url IS NOT NULL AND s.justificacion_pdf_url != '', 1, 0) AS tiene_justificacion_pdf,
-                 IF(s.requerimientos_pdf_url IS NOT NULL AND s.requerimientos_pdf_url != '', 1, 0) AS tiene_requerimientos_pdf
-          FROM solicitudes_compra s
-          JOIN usuarios u ON s.id_solicitante = u.id_usuario
-          JOIN gerencias g ON s.id_gerencia = g.id_gerencia
-          JOIN estados_solicitud e ON s.id_estado = e.id_estado
-          WHERE s.id_solicitud = ?`, [id]
-      );
-
-      if (!rows.length) return res.status(404).send('Solicitud no encontrada');
-      const sol = rows[0];
-
-      // Obtención de los ítems asociados a la solicitud
-      const [items] = await pool.query(
-         `SELECT ds.*, 
-                 COALESCE(p.nombre_producto, s.nombre_servicio) as descripcion,
-                 COALESCE(p.codigo_producto, s.codigo_servicio) as nro_parte,
-                 um.abreviatura as unidad
-          FROM detalles_solicitud ds
-          LEFT JOIN productos_almacen p ON ds.id_producto = p.id_producto
-          LEFT JOIN servicios s ON ds.id_servicio = s.id_servicio
-          LEFT JOIN unidades_medida um ON p.id_unidad = um.id_unidad
-          WHERE ds.id_solicitud = ?`, [id]
-      );
-
-      // Configuración de la instancia de PDFKit
-      const doc = new PDFDocument({ 
-         size: 'A4', 
-         margins: { top: 40, bottom: 40, left: 40, right: 40 },
-         bufferPages: true 
-      });
-      
-      const fragments = [];
-      doc.on('data', (chunk) => fragments.push(chunk));
-
-      let currentY = 20;
-
-      // --- COMPONENTES VISUALES INTERNOS ---
-      const dibujarCabeceraLogos = (yCoord) => {
-         doc.image('public/desarrollo.png', 40, yCoord, { height: 40, width: 290 });
-         doc.image('public/cvg.png', 450, yCoord - 9, { width: 50, height: 50 });
-         doc.moveTo(509, yCoord).lineTo(509, yCoord + 35).lineWidth(0.5).strokeColor(PALETTE.primary).stroke();
-         doc.image('public/CVG2.png', 510, yCoord - 6, { height: 50, width: 50 });
-      };
-
-      const dibujarTitulosFormulario = (yCoord) => {
-         doc.fillColor(PALETTE.text).font('Helvetica-Bold').fontSize(14).text('SOLICITUD DE COMPRA Y SUMINISTROS', 165, yCoord + 16);
-         doc.fontSize(8).fillColor(PALETTE.muted).font('Helvetica').text('CÓDIGO: FOR-LOG-001 | REVISIÓN: 04', 40, yCoord + 55);
-      };
-
-      const dibujarSubHeaderTabla = (yCoord) => {
-         doc.rect(40, yCoord, 515, 20).fill(PALETTE.primary);
-         const headers = ['#', 'DESCRIPCIÓN TÉCNICA', 'NRO. PARTE', 'CANT.', 'UNIDAD'];
-         let startX = 45;
-         headers.forEach((h, i) => {
-            doc.fillColor(PALETTE.white).fontSize(8).font('Helvetica-Bold').text(h, startX, yCoord + 6);
-            startX += i === 0 ? 30 : i === 1 ? 280 : i === 2 ? 80 : 60;
-         });
-      };
-
-      // --- CONSTRUCCIÓN MAQUETA BASE ---
-      dibujarCabeceraLogos(currentY);
-      currentY += 60;
-      dibujarTitulosFormulario(currentY);
-      currentY += 55;
-      
-      // Indicador de control numérico correlativo
-      doc.roundedRect(420, currentY, 135, 45, 8).fill(PALETTE.accent);
-      doc.fillColor(PALETTE.primary).fontSize(7).font('Helvetica-Bold').text('NRO. CONTROL', 430, currentY + 10);
-      doc.fontSize(14).text(`SCS-${String(id).padStart(5, '0')}`, 430, currentY + 22);
-      doc.fontSize(8).fillColor(PALETTE.muted).font('Helvetica').text('Tipo de solicitud:', 40, currentY + 15);
-      doc.fontSize(9).fillColor(PALETTE.primary).font('Helvetica-Bold').text(sol.tipo_solicitud, 101, currentY + 15);
-      currentY += 60;
-
-      // Bloque de identificación de metadata
-      const drawField = (label, value, x, y, width) => {
-         doc.fillColor(PALETTE.muted).fontSize(7).font('Helvetica-Bold').text(label, x, y);
-         doc.fillColor(PALETTE.text).fontSize(9).font('Helvetica').text(value || 'N/A', x, y + 12, { width: width });
-      };
-      doc.rect(40, currentY, 515, 60).strokeColor(PALETTE.border).stroke();
-      drawField('DEPARTAMENTO SOLICITANTE', sol.departamento.toUpperCase(), 55, currentY + 10, 200);
-      drawField('FECHA DE EMISIÓN', new Date(sol.fecha_creacion).toLocaleDateString('es-VE'), 300, currentY + 10, 100);
-      drawField('PRIORIDAD', (sol.prioridad || 'NORMAL').toUpperCase(), 450, currentY + 10, 80);
-      drawField('SOLICITANTE', `${sol.nombres} ${sol.apellidos} (V-${sol.cedula})`, 55, currentY + 35, 250);
-      drawField('ESTADO ACTUAL', sol.estado_actual.toUpperCase(), 300, currentY + 35, 200);
-      currentY += 80;
-
-      // Sección de justificación estructurada
-      doc.fillColor(PALETTE.primary).fontSize(10).font('Helvetica-Bold').text('JUSTIFICACIÓN Y ALCANCE', 40, currentY);
-      doc.rect(40, currentY + 15, 515, 50).fill(PALETTE.accent);
-      doc.fillColor(PALETTE.text).fontSize(8).font('Helvetica').text(sol.justificacion || 'Sin justificación detallada.', 50, currentY + 23, { width: 495, align: 'justify' });
-      currentY += 85;
-
-      // Renderizado del subencabezado de la tabla
-      dibujarSubHeaderTabla(currentY);
-      currentY += 20;
-
-      // Ciclo dinámico de ítems cargados
-      items.forEach((item, index) => {
-         if (currentY > 680) {
-            doc.addPage(); 
-            currentY = 20;
-            dibujarCabeceraLogos(currentY);
-            currentY += 60;
-            dibujarTitulosFormulario(currentY);
-            currentY += 75;
-            dibujarSubHeaderTabla(currentY);
-            currentY += 20;
-         }
-         const isEven = index % 2 === 0;
-         if (isEven) doc.rect(40, currentY, 515, 20).fill('#f1f5f9');
-
-         doc.fillColor(PALETTE.text).fontSize(8).font('Helvetica');
-         doc.text(index + 1, 45, currentY + 6);
-         doc.text(item.descripcion, 75, currentY + 6, { width: 270, height: 10, ellipsis: true });
-         doc.text(item.nro_parte || 'S/C', 355, currentY + 6);
-         doc.text(item.cantidad, 435, currentY + 6);
-         doc.text(item.unidad || 'UND', 495, currentY + 6);
-         currentY += 20; 
-      });
-
-      // Cuadro inferior reglamentario de firmas
-      if (currentY > 640) {
-         doc.addPage(); currentY = 20; dibujarCabeceraLogos(currentY); dibujarTitulosFormulario(currentY); currentY += 90;
-      } else {
-         currentY = Math.max(currentY + 30, 580);
-      }
-      const SIGNATURE_BOX_HEIGHT = 80;
-      doc.rect(40, currentY, 515, SIGNATURE_BOX_HEIGHT).strokeColor(PALETTE.border).stroke();
-
-      const drawSignature = (title, x) => {
-         doc.moveTo(x, currentY + 50).lineTo(x + 140, currentY + 50).strokeColor(PALETTE.muted).stroke();
-         doc.fillColor(PALETTE.primary).fontSize(7).font('Helvetica-Bold').text(title, x, currentY + 55, { width: 140, align: 'center' });
-         doc.fillColor(PALETTE.muted).fontSize(6).font('Helvetica').text('FIRMA Y SELLO', x, currentY + 65, { width: 140, align: 'center' });
-      };
-      drawSignature('SOLICITANTE', 60);
-      drawSignature('GERENTE DE ÁREA', 227);
-      drawSignature('RECEPCIÓN PROCURA', 395);
-
-      // Estampado de cintillo inferior institucional
-      const totalPages = doc.bufferedPageRange().count;
-      for (let i = 0; i < totalPages; i++) {
-         doc.switchToPage(i);
-         doc.image('public/footer.png', 0, 705, { width: 595.28, height: 140 });
-      }
-
-   // Interceptor del fin del flujo de PDFKit
-doc.on('end', async () => {
-   try {
-      // 1. Inicializamos el buffer dinámico con el resultado maestro de PDFKit
-      let pdfBufferActual = Buffer.concat(fragments);
-
-      // ====================================================================
-      // FASE B: PROCESAR BLOQUE DE JUSTIFICACIÓN Y ALCANCE
-      // ====================================================================
-      const rutaPdfJustificacion = `Backend/uploads/solicitudes/${sol.justificacion_pdf_url}`;
-
-      if (sol.tiene_justificacion_pdf === 1 && fs.existsSync(rutaPdfJustificacion)) {
-         console.log('Acoplando archivo PDF físico de Justificación...');
-         // Trabajamos sobre el "pdfBufferActual" que YA contiene los requerimientos de la Fase A
-         pdfBufferActual = await adjuntarAnexosConEstilo(pdfBufferActual, rutaPdfJustificacion, 'Justificación y Alcance');
-      } else {
-         console.log('No se detectó PDF de justificación. Generando desde campo de texto...');
-         const textoJustificacion = sol.justificacion || 'No se registró justificación detallada en texto.';
-         
-         // Agrega otra hoja nueva al final con el texto de la justificación
-         pdfBufferActual = await generarHojaTextoAlternativo(pdfBufferActual, textoJustificacion, 'Justificación y Alcance');
-      }
-
-      
-      // ====================================================================
-      // FASE A: PROCESAR BLOQUE DE REQUERIMIENTOS TÉCNICOS
-      // ====================================================================
-      const rutaPdfRequerimientos = `Backend/uploads/solicitudes/${sol.requerimientos_pdf_url}`;
-
-      if (sol.tiene_requerimientos_pdf === 1 && fs.existsSync(rutaPdfRequerimientos)) {
-         console.log('Acoplando archivo PDF físico de Requerimientos...');
-         // Modifica la hoja original inyectándole las páginas vectoriales del PDF
-         pdfBufferActual = await adjuntarAnexosConEstilo(pdfBufferActual, rutaPdfRequerimientos, 'Especificaciones Técnicas');
-      } else {
-         console.log('No se detectó PDF de requerimientos. Generando desde campo de texto...');
-         const textoRequerimientos = sol.requerimientos_texto || 'No se registraron especificaciones técnicas en texto.';
-         
-         // Agrega una hoja nueva con el texto formateado y centrado
-         pdfBufferActual = await generarHojaTextoAlternativo(pdfBufferActual, textoRequerimientos, 'Requerimientos Técnicos');
-      }
-
-      // ====================================================================
-      // FASE C: DESPACHO ÚNICO AL NAVEGADOR DEL CLIENTE
-      // ====================================================================
-      console.log('Enviando documento SCS final con todos los anexos procesados...');
+      const buffer = await generarPDFBuffer(id);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename=SCS-${id}.pdf`);
-      
-      // Enviamos el buffer final que pasó exitosamente por ambas fases
-      return res.send(Buffer.from(pdfBufferActual));
-
-   } catch (err) {
-      console.error('Error crítico procesando la fase final del PDF:', err);
-      if (!res.headersSent) {
-         res.status(500).json({ error: 'Fallo al acoplar anexos y textos en el flujo SCS' });
-      }
-   }
-});
-
-      // Cerramos de forma definitiva el documento maestro
-      doc.end();
-
+      return res.send(Buffer.from(buffer));
    } catch (error) {
       console.error('Error crítico general:', error);
       if (!res.headersSent) {
@@ -692,7 +691,7 @@ export async function generarPlanillaPDF() {
    drawTechnicalSpecsPage(doc, solicitudEjemplo, detallesEjemplo);
 
    const pdfkitBuffer = await pdfkitToBuffer(doc);
-   const mainDoc = await LibDocument.load(pdfkitBuffer);
+   const mainDoc = await PDFLibDocument.load(pdfkitBuffer);
    const helv = await mainDoc.embedFont(StandardFonts.Helvetica);
    const pages = mainDoc.getPages();
 

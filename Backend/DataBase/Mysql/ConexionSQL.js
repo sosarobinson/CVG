@@ -6,7 +6,7 @@ export let statusconnectionsql = false
 const conexionDATA = {
   host: 'localhost',
   user: 'root',
-  database: 'cvg',
+  database: 'cvg-p',
   password: '',
   supportBigNumbers: true,
   bigNumberStrings: false,

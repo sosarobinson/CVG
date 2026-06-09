@@ -5,6 +5,7 @@
 
 import pool from '../DataBase/Mysql/ConexionSQL.js';
 import hasPermission from '../Milaware/hasPermission.js';
+import { connection as connectionAccess } from '../DataBase/Acces/ConexionACCES.js';
 
 // ── Categorías ────────────────────────────────────────────────────────────────
 
@@ -25,12 +26,29 @@ export const createCategoria = async (req, res) => {
         return res.status(401).json({ error: 'No autorizado' });
     }
     try {
-        const { nombre_categoria, descripcion } = req.body;
+        const { nombre_categoria, descripcion, codigo } = req.body;
         const [result] = await pool.query(
-            'INSERT INTO categorias (nombre_categoria, descripcion) VALUES (?, ?)',
-            [nombre_categoria, descripcion]
+            'INSERT INTO categorias (nombre_categoria, descripcion, codigo) VALUES (?, ?, ?)',
+            [nombre_categoria, descripcion, codigo || null]
         );
-        res.status(201).json({ message: 'Categoría creada', id: result.insertId });
+        const id_categoria = result.insertId;
+        const finalCodigo = codigo || String(id_categoria).padStart(4, '0');
+        
+        if (!codigo) {
+            await pool.query('UPDATE categorias SET codigo = ? WHERE id_categoria = ?', [finalCodigo, id_categoria]);
+        }
+
+        // Insertar también en Access tipoRepuesto
+        try {
+            await connectionAccess.execute(`
+                INSERT INTO [tipoRepuesto] ([codigo_tipo], [Descripcion_tipo])
+                VALUES ('${finalCodigo.slice(0, 4)}', '${nombre_categoria.replace(/'/g, "''").slice(0, 50)}')
+            `);
+        } catch (accessErr) {
+            console.error('Error al insertar categoría en Access:', accessErr);
+        }
+
+        res.status(201).json({ message: 'Categoría creada', id: id_categoria, codigo: finalCodigo });
     } catch (error) {
         console.error('Error al crear categoria:', error);
         res.status(500).json({ error: 'Error del servidor' });
@@ -124,6 +142,27 @@ export const createProducto = async (req, res) => {
             INSERT INTO productos_almacen (codigo_producto, nombre_producto, descripcion, id_categoria, stock_minimo, stock_actual)
             VALUES (?, ?, ?, ?, ?, ?)
         `, [codigo_producto, nombre_producto, descripcion, id_categoria, stock_minimo, stock_actual]);
+
+        // Insertar también en Access (InventarioRepuestos e InventarioFisico)
+        try {
+            const [catRows] = await pool.query('SELECT codigo FROM categorias WHERE id_categoria = ? LIMIT 1', [id_categoria]);
+            const cod_tipo = catRows[0]?.codigo || 'CO01';
+
+            // 1. InventarioRepuestos
+            await connectionAccess.execute(`
+                INSERT INTO [InventarioRepuestos] ([descripcion_repuesto], [cod_repuesto], [cod_tipo], [cant_minima])
+                VALUES ('${nombre_producto.replace(/'/g, "''").slice(0, 100)}', '${codigo_producto.replace(/'/g, "''").slice(0, 50)}', '${cod_tipo.replace(/'/g, "''").slice(0, 10)}', ${Number(stock_minimo) || 0})
+            `);
+
+            // 2. InventarioFisico
+            await connectionAccess.execute(`
+                INSERT INTO [InventarioFisico] ([cod_repuesto], [inv_fisico])
+                VALUES ('${codigo_producto.replace(/'/g, "''").slice(0, 50)}', ${Number(stock_actual) || 0})
+            `);
+        } catch (accessErr) {
+            console.error('Error al insertar producto en Access:', accessErr);
+        }
+
         res.status(201).json({ message: 'Producto creado', id: result.insertId });
     } catch (error) {
         console.error('Error al crear producto:', error);

@@ -128,7 +128,8 @@ const buscarUsuario = async (body = {}) => {
 
         return { rows, condicion }
     } catch (err) {
-        return err
+        console.error('Error in buscarUsuario:', err);
+        return null;
     }
 }
 
@@ -146,14 +147,13 @@ const verificarUsuarios = async (body = {}) => {
         return { success: false, error: "La contraseña no puede estar vacía" };
     }
 
-    // userDB recibe { rows: [...], condicion: ... }
-    const userDB = await buscarUsuario({ username: username })
+    // userDB recibe { rows: [...], condicion: ... } o null en caso de error/no encontrado
+    const userDB = await buscarUsuario({ username: username });
 
-    if (!userDB) {
+    if (!userDB || !userDB.rows || !Array.isArray(userDB.rows) || userDB.rows.length === 0) {
         return { success: false, error: "Usuario no encontrado" };
     }
 
-    // CORRECCIÓN: Accedemos a .rows[0] en lugar de acceder al objeto directamente
     const usuarioEncontrado = userDB.rows[0];
 
 

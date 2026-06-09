@@ -9,6 +9,9 @@ import pool from '../DataBase/Mysql/ConexionSQL.js';
 import { insetSolicitud } from '../DataBase/Mysql/InsertSQL.js';
 import { consultarproductos, solicitudESCOMPRA } from '../DataBase/Mysql/ConsultasSQL.js';
 import { getIO } from '../socket.js';
+import { generarPDFBuffer } from '../Milaware/PDF.js';
+import { sendStatusChangeEmail, sendApprovalEmail } from '../Funciones/mailer.js';
+import { connection as connectionAccess } from '../DataBase/Acces/ConexionACCES.js';
 
 // ── Helper privado ────────────────────────────────────────────────────────────
 const getEstadoId = async (nombre) => {
@@ -308,6 +311,33 @@ export const updateEstado = async (req, res) => {
                 estado_color: estadoInfo.color_hex
             });
         } catch (_) { /* Socket no crítico */ }
+
+        // ── Enviar Notificación por Correo (Asíncrono en segundo plano) ────────────────
+        (async () => {
+            try {
+                const [userRows] = await pool.query(
+                    'SELECT email, nombres, apellidos FROM usuarios WHERE id_usuario = ? LIMIT 1',
+                    [solicitud.id_solicitante]
+                );
+
+                if (userRows.length > 0) {
+                    const requester = userRows[0];
+                    let destEmail = requester.email || 'esteysertorres2@gmail.com';
+                    const nombresCompletos = `${requester.nombres} ${requester.apellidos}`;
+
+                    if (estadoFinal === 'Aprovadas') {
+                        // Generar PDF y enviar correo de aprobación con adjunto
+                        const pdfBuffer = await generarPDFBuffer(id);
+                        await sendApprovalEmail(destEmail, nombresCompletos, id, solicitud.resumen, pdfBuffer);
+                    } else {
+                        // Notificación de cambio de estado
+                        await sendStatusChangeEmail(destEmail, nombresCompletos, id, solicitud.resumen, estadoFinal);
+                    }
+                }
+            } catch (emailErr) {
+                console.error('[Notification Email Error] Error enviando correo de cambio de estado:', emailErr);
+            }
+        })();
 
         // Si fue aprobado por gerencia, notificar a usuarios de Almacén (no crear chats automáticamente)
         if (estadoFinal === 'Aprobado Gerencia') {
@@ -686,6 +716,29 @@ export const codificarSolicitudProducto = async (req, res) => {
         const [resAlert] = await connection.query(`INSERT INTO notificaciones_not_solisitud (id_gerencia, contenido, status) VALUES (?, ?, ?)`, [idGerencia || 1, contenidoAlert, 'ok']);
 
         await connection.commit();
+
+        // Insertar también en Access (InventarioRepuestos e InventarioFisico)
+        (async () => {
+            try {
+                const [catRows] = await pool.query('SELECT codigo FROM categorias WHERE id_categoria = ? LIMIT 1', [id_categoria]);
+                const cod_tipo = catRows[0]?.codigo || 'CO01';
+
+                // 1. InventarioRepuestos
+                await connectionAccess.execute(`
+                    INSERT INTO [InventarioRepuestos] ([descripcion_repuesto], [cod_repuesto], [cod_tipo], [cant_minima])
+                    VALUES ('${nombre_producto.trim().replace(/'/g, "''").slice(0, 100)}', '${codigo_producto.trim().replace(/'/g, "''").slice(0, 50)}', '${cod_tipo.trim().replace(/'/g, "''").slice(0, 10)}', ${Number(stock_minimo) || 0})
+                `);
+
+                // 2. InventarioFisico
+                await connectionAccess.execute(`
+                    INSERT INTO [InventarioFisico] ([cod_repuesto], [inv_fisico])
+                    VALUES ('${codigo_producto.trim().replace(/'/g, "''").slice(0, 50)}', ${Number(stockToInsert) || 0})
+                `);
+                console.log('[Access Setup] Producto codificado insertado en Access.');
+            } catch (accessErr) {
+                console.error('Error al insertar producto codificado en Access:', accessErr);
+            }
+        })();
 
         try { getIO().to('almacen').emit('producto_creado', { id_producto: prodResult.insertId, nombre_producto: nombre_producto.trim(), fecha_creacion: new Date().toISOString(), stock_actual: stockToInsert }); } catch (_) {}
 

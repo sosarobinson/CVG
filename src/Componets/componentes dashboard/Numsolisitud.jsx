@@ -256,6 +256,13 @@ export const Boton = ({ onRefresh }) => {
     )
   );
 
+  const setQty = (id, value) => setSelectedItems(prev =>
+    prev.map(p => (p.id_producto || p.id_servicio) === id
+      ? { ...p, cantidad: Math.max(1, Number(value) || 1) }
+      : p
+    )
+  );
+
   const goNext = () => {
     if (step === 1 && !tipoSolicitud) return gooeyToast.warning('Selecciona el tipo de solicitud', { showTimestamp: false });
     if (step === 2 && !resumen.trim()) return gooeyToast.warning('El resumen es obligatorio', { showTimestamp: false });
@@ -414,7 +421,14 @@ export const Boton = ({ onRefresh }) => {
                               <div className="flex items-center gap-2">
                                 <div className="flex items-center gap-1 bg-slate-100 rounded-lg px-1">
                                   <button type="button" onClick={() => updateQty(itemId, -1)} className="w-6 h-6 flex items-center justify-center text-slate-500 hover:text-slate-900 font-black text-base transition-colors">−</button>
-                                  <span className="text-sm font-black text-slate-800 w-6 text-center">{p.cantidad}</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    value={p.cantidad}
+                                    onChange={(e) => setQty(itemId, e.target.value)}
+                                    onBlur={() => { if (!p.cantidad || Number(p.cantidad) < 1) setQty(itemId, 1); }}
+                                    className="w-12 text-sm text-center bg-transparent outline-none font-black"
+                                  />
                                   <button type="button" onClick={() => updateQty(itemId, 1)} className="w-6 h-6 flex items-center justify-center text-slate-500 hover:text-slate-900 font-black text-base transition-colors">+</button>
                                 </div>
                                 <button type="button" onClick={() => removeItem(itemId)} className="text-rose-400 hover:bg-rose-50 p-1.5 rounded-lg transition-colors">
